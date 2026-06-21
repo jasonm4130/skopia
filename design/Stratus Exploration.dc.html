@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @keyframes stratusPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+</style>
+</helmet>
+
+<div style="min-width:100%; width:max-content; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; font-family:'Hanken Grotesk',sans-serif;">
+
+  <!-- ===== INTRO / RATIONALE ===== -->
+  <div style="width:1280px; background:#fff; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:34px 40px; margin-bottom:48px;">
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:18px;">
+      <div style="display:flex; flex-direction:column; gap:2.5px;">
+        <div style="width:22px; height:3px; border-radius:2px; background:#2f6bf0;"></div>
+        <div style="width:16px; height:3px; border-radius:2px; background:#2f6bf0; opacity:.7;"></div>
+        <div style="width:20px; height:3px; border-radius:2px; background:#2f6bf0; opacity:.45;"></div>
+      </div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; letter-spacing:-.01em; color:#14161b;">Stratus</div>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8a909e; text-transform:uppercase; letter-spacing:.14em; padding-top:2px;">design exploration · v1</div>
+    </div>
+    <div style="display:flex; gap:48px;">
+      <p style="margin:0; max-width:620px; font-size:15.5px; line-height:1.6; color:#3c414d;">Two complete directions, each spanning <strong style="color:#14161b; font-weight:600;">landing → dashboard</strong> so you can mix and match. <strong style="color:#14161b; font-weight:600;">A</strong> is light, calm and editorial. <strong style="color:#14161b; font-weight:600;">B</strong> is a dark, data-forward system. Both lead with the real moat — own your data, zero ops on Cloudflare — and use privacy as the trust backbone, not the whole headline.</p>
+      <div style="display:flex; gap:40px; font-size:13px; color:#5b6170;">
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:#9aa0ad; margin-bottom:8px;">Type</div>
+          <div style="line-height:1.7;">Space Grotesk <span style="color:#9aa0ad;">display</span><br>Hanken Grotesk <span style="color:#9aa0ad;">text</span><br>JetBrains Mono <span style="color:#9aa0ad;">code</span></div>
+        </div>
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:#9aa0ad; margin-bottom:8px;">Accent</div>
+          <div style="display:flex; align-items:center; gap:8px; line-height:1.7;"><span style="width:13px; height:13px; border-radius:3px; background:#2f6bf0;"></span> Electric azure</div>
+          <div style="display:flex; align-items:center; gap:8px; line-height:1.7;"><span style="width:13px; height:13px; border-radius:3px; background:#14161b;"></span> Ink</div>
+          <div style="display:flex; align-items:center; gap:8px; line-height:1.7;"><span style="width:13px; height:13px; border-radius:3px; background:#14b86a;"></span> Live</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION: LANDING ===== -->
+  <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; letter-spacing:.16em; color:#75726b; margin-bottom:18px;">01 — Landing page</div>
+  <div style="display:flex; gap:48px; align-items:flex-start; margin-bottom:56px;">
+
+    <!-- ---- LANDING A : LIGHT EDITORIAL ---- -->
+    <div style="flex:none; width:1280px;">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.1em; color:#75726b; margin-bottom:12px;">A · light / editorial</div>
+      <div style="background:#f6f7f9; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.08); overflow:hidden;">
+        <!-- nav -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:22px 48px; border-bottom:1px solid #ebedf1;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="display:flex; flex-direction:column; gap:2.5px;">
+              <div style="width:18px; height:2.5px; border-radius:2px; background:#14161b;"></div>
+              <div style="width:13px; height:2.5px; border-radius:2px; background:#14161b; opacity:.7;"></div>
+              <div style="width:16px; height:2.5px; border-radius:2px; background:#14161b; opacity:.45;"></div>
+            </div>
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px; letter-spacing:-.01em; color:#14161b;">Stratus</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:30px; font-size:14px; color:#5b6170;">
+            <span>Features</span><span>Docs</span><span>Pricing</span><span style="display:flex; align-items:center; gap:6px;">GitHub <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#9aa0ad;">4.2k</span></span>
+            <span style="background:#14161b; color:#fff; padding:9px 16px; border-radius:7px; font-weight:600; font-size:13.5px;">Deploy free</span>
+          </div>
+        </div>
+        <!-- hero -->
+        <div style="display:flex; gap:56px; padding:72px 48px 60px;">
+          <div style="flex:1; padding-top:8px;">
+            <div style="display:inline-flex; align-items:center; gap:8px; font-family:'JetBrains Mono',monospace; font-size:12px; color:#2f6bf0; background:#eaf0fe; padding:6px 12px; border-radius:20px; margin-bottom:26px;"><span style="width:6px; height:6px; border-radius:50%; background:#2f6bf0;"></span> web analytics · yours to own</div>
+            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:58px; line-height:1.02; letter-spacing:-.025em; color:#14161b; margin:0 0 22px;">Your analytics.<br>Your Cloudflare.<br><span style="color:#2f6bf0;">Zero ops.</span></h1>
+            <p style="font-size:18px; line-height:1.55; color:#4a4f5b; max-width:440px; margin:0 0 34px;">Stratus deploys to your own Cloudflare account in one command. No database to babysit, no cookies, no consent banner — just the numbers that matter.</p>
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:30px;">
+              <span style="background:#2f6bf0; color:#fff; padding:14px 24px; border-radius:9px; font-weight:600; font-size:15.5px; box-shadow:0 6px 18px rgba(47,107,240,.28);">Deploy to Cloudflare →</span>
+              <span style="padding:14px 22px; border-radius:9px; font-weight:600; font-size:15.5px; color:#14161b; border:1px solid #d9dce2;">Live demo</span>
+            </div>
+            <div style="display:flex; gap:26px; font-size:13.5px; color:#6b7180;">
+              <span style="display:flex; align-items:center; gap:7px;"><span style="color:#14b86a; font-weight:700;">✓</span> Cookieless</span>
+              <span style="display:flex; align-items:center; gap:7px;"><span style="color:#14b86a; font-weight:700;">✓</span> GDPR-ready, no banner</span>
+              <span style="display:flex; align-items:center; gap:7px;"><span style="color:#14b86a; font-weight:700;">✓</span> AGPL-3.0 licensed</span>
+            </div>
+          </div>
+          <!-- code card -->
+          <div style="flex:none; width:454px; align-self:center;">
+            <div style="background:#14161b; border-radius:12px; box-shadow:0 24px 60px -20px rgba(20,22,27,.5); overflow:hidden;">
+              <div style="display:flex; align-items:center; gap:7px; padding:14px 16px; border-bottom:1px solid #262932;">
+                <span style="width:11px; height:11px; border-radius:50%; background:#3a3e49;"></span>
+                <span style="width:11px; height:11px; border-radius:50%; background:#3a3e49;"></span>
+                <span style="width:11px; height:11px; border-radius:50%; background:#3a3e49;"></span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6a7080; margin-left:8px;">~/my-site</span>
+              </div>
+              <div style="padding:22px 22px 26px; font-family:'JetBrains Mono',monospace; font-size:13.5px; line-height:1.9;">
+                <div style="color:#6a7080;"># 1 · deploy to your account</div>
+                <div style="color:#e7e9ee;"><span style="color:#5fd39a;">$</span> npx stratus deploy</div>
+                <div style="color:#6a7080; margin-top:4px;">  ✓ Worker live · ✓ D1 ready · 8s</div>
+                <div style="color:#6a7080; margin-top:18px;"># 2 · add the snippet</div>
+                <div style="color:#9fb4ff; word-break:break-all;">&lt;script src=<span style="color:#e7e9ee;">"https://you.dev/s.js"</span> defer&gt;&lt;/script&gt;</div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid #262932;">
+                  <span style="color:#6a7080;">script size</span>
+                  <span style="color:#fff; background:#2f6bf0; padding:3px 10px; border-radius:6px; font-weight:500;">1.9 KB</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- comparison -->
+        <div style="padding:8px 48px 64px;">
+          <div style="background:#fff; border:1px solid #ebedf1; border-radius:14px; overflow:hidden;">
+            <div style="display:grid; grid-template-columns:1.6fr 1fr 1fr 1fr;">
+              <div style="padding:22px 26px; border-bottom:1px solid #ebedf1;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:17px; color:#14161b;">Why Stratus</div></div>
+              <div style="padding:22px 18px; border-bottom:1px solid #ebedf1; border-left:1px solid #ebedf1; text-align:center; background:#f4f8ff;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; color:#2f6bf0;">Stratus</div></div>
+              <div style="padding:22px 18px; border-bottom:1px solid #ebedf1; border-left:1px solid #ebedf1; text-align:center;"><div style="font-weight:600; font-size:14px; color:#6b7180;">Hosted SaaS</div></div>
+              <div style="padding:22px 18px; border-bottom:1px solid #ebedf1; border-left:1px solid #ebedf1; text-align:center;"><div style="font-weight:600; font-size:14px; color:#6b7180;">Other self-host</div></div>
+
+              <div style="padding:18px 26px; border-bottom:1px solid #f1f2f5; font-size:14.5px; color:#3c414d;">You own the raw data</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; background:#f9fbff; color:#14b86a; font-weight:700;">✓</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#cdd1d8; font-weight:700;">✕</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#14b86a; font-weight:700;">✓</div>
+
+              <div style="padding:18px 26px; border-bottom:1px solid #f1f2f5; font-size:14.5px; color:#3c414d;">No database to run</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; background:#f9fbff; color:#14b86a; font-weight:700;">✓</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#14b86a; font-weight:700;">✓</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#cdd1d8; font-weight:700;">✕</div>
+
+              <div style="padding:18px 26px; border-bottom:1px solid #f1f2f5; font-size:14.5px; color:#3c414d;">Cookieless · no consent banner</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; background:#f9fbff; color:#14b86a; font-weight:700;">✓</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#14b86a; font-weight:700;">✓</div>
+              <div style="padding:18px; border-bottom:1px solid #f1f2f5; border-left:1px solid #ebedf1; text-align:center; color:#9aa0ad; font-weight:500; font-size:13px;">varies</div>
+
+              <div style="padding:18px 26px; font-size:14.5px; color:#3c414d;">Cost at scale</div>
+              <div style="padding:18px; border-left:1px solid #ebedf1; text-align:center; background:#f9fbff; font-family:'JetBrains Mono',monospace; font-size:13px; color:#14161b;">~$5/mo</div>
+              <div style="padding:18px; border-left:1px solid #ebedf1; text-align:center; font-family:'JetBrains Mono',monospace; font-size:13px; color:#6b7180;">$19–90</div>
+              <div style="padding:18px; border-left:1px solid #ebedf1; text-align:center; font-family:'JetBrains Mono',monospace; font-size:13px; color:#6b7180;">server +</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- LANDING B : DARK PRODUCT-FORWARD ---- -->
+    <div style="flex:none; width:1280px;">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.1em; color:#75726b; margin-bottom:12px;">B · dark / product-forward</div>
+      <div style="background:#0a0c11; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.18); overflow:hidden;">
+        <!-- nav -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:22px 48px; border-bottom:1px solid #1b1f29;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="display:flex; flex-direction:column; gap:2.5px;">
+              <div style="width:18px; height:2.5px; border-radius:2px; background:#4d86ff;"></div>
+              <div style="width:13px; height:2.5px; border-radius:2px; background:#4d86ff; opacity:.7;"></div>
+              <div style="width:16px; height:2.5px; border-radius:2px; background:#4d86ff; opacity:.45;"></div>
+            </div>
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px; letter-spacing:-.01em; color:#fff;">Stratus</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:30px; font-size:14px; color:#9097a8;">
+            <span>Features</span><span>Docs</span><span>Pricing</span>
+            <span style="display:flex; align-items:center; gap:7px; border:1px solid #262b38; padding:8px 13px; border-radius:7px; color:#cfd4e0;"><span style="color:#ffce4d;">★</span> 4.2k</span>
+            <span style="background:#4d86ff; color:#fff; padding:9px 16px; border-radius:7px; font-weight:600; font-size:13.5px;">Deploy free</span>
+          </div>
+        </div>
+        <!-- hero -->
+        <div style="display:flex; gap:48px; padding:70px 48px 56px; position:relative;">
+          <div style="position:absolute; top:-120px; left:280px; width:520px; height:520px; background:radial-gradient(circle, rgba(77,134,255,.16), transparent 62%); pointer-events:none;"></div>
+          <div style="flex:1; padding-top:6px; position:relative;">
+            <div style="display:inline-flex; align-items:center; gap:8px; font-family:'JetBrains Mono',monospace; font-size:12px; color:#8fb0ff; background:rgba(77,134,255,.12); padding:6px 12px; border-radius:20px; margin-bottom:26px;">open source · self-hosted on cloudflare</div>
+            <h1 style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:60px; line-height:1.0; letter-spacing:-.03em; color:#fff; margin:0 0 22px;">See what matters.<br><span style="color:#6a7184;">Nothing you don't.</span></h1>
+            <p style="font-size:18px; line-height:1.55; color:#9aa1b2; max-width:430px; margin:0 0 34px;">A privacy-first analytics engine that runs entirely on your Cloudflare Workers. Yours to own, nothing to maintain, under 2 KB on the wire.</p>
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:42px;">
+              <span style="background:#4d86ff; color:#fff; padding:14px 24px; border-radius:9px; font-weight:600; font-size:15.5px; box-shadow:0 6px 22px rgba(77,134,255,.34);">Deploy to Cloudflare →</span>
+              <span style="display:flex; align-items:center; gap:8px; padding:14px 20px; border-radius:9px; font-weight:600; font-size:15.5px; color:#e8eaef; border:1px solid #2a3040;"><span style="color:#ffce4d;">★</span> Star · 4.2k</span>
+            </div>
+            <div style="display:flex; gap:0; border-top:1px solid #1b1f29; padding-top:26px;">
+              <div style="flex:1;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; color:#fff;">1.9 KB</div><div style="font-size:12.5px; color:#7a8195; margin-top:3px;">script size</div></div>
+              <div style="flex:1;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; color:#fff;">$0</div><div style="font-size:12.5px; color:#7a8195; margin-top:3px;">to start</div></div>
+              <div style="flex:1;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; color:#fff;">~$5</div><div style="font-size:12.5px; color:#7a8195; margin-top:3px;">at 1M views</div></div>
+              <div style="flex:1;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; color:#2bd888;">0</div><div style="font-size:12.5px; color:#7a8195; margin-top:3px;">cookies</div></div>
+            </div>
+          </div>
+          <!-- live mini dashboard -->
+          <div style="flex:none; width:430px; align-self:center; position:relative;">
+            <div style="background:#12151d; border:1px solid #20252f; border-radius:14px; padding:22px; box-shadow:0 30px 70px -28px rgba(0,0,0,.8);">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                <span style="font-size:13px; color:#9aa1b2;">you.dev</span>
+                <span style="display:flex; align-items:center; gap:7px; font-family:'JetBrains Mono',monospace; font-size:12px; color:#2bd888;"><span style="width:7px; height:7px; border-radius:50%; background:#2bd888; animation:stratusPulse 1.6s infinite;"></span> 24 online</span>
+              </div>
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:42px; color:#fff; letter-spacing:-.02em; line-height:1;">48,231</div>
+              <div style="font-size:13px; color:#7a8195; margin-top:6px; margin-bottom:18px;">visitors · last 30 days <span style="color:#2bd888;">↑ 12%</span></div>
+              <svg viewBox="0 0 386 110" style="width:100%; height:96px; display:block;">
+                <defs><linearGradient id="sparkB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d86ff" stop-opacity=".34"/><stop offset="1" stop-color="#4d86ff" stop-opacity="0"/></linearGradient></defs>
+                <path d="M0,78 L32,66 L64,82 L96,48 L128,60 L160,38 L192,54 L224,30 L256,46 L288,24 L320,40 L352,18 L386,30 L386,110 L0,110 Z" fill="url(#sparkB)"/>
+                <path d="M0,78 L32,66 L64,82 L96,48 L128,60 L160,38 L192,54 L224,30 L256,46 L288,24 L320,40 L352,18 L386,30" fill="none" stroke="#4d86ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div style="border-top:1px solid #20252f; margin-top:18px; padding-top:16px;">
+                <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; color:#6a7184; margin-bottom:12px;">top pages</div>
+                <div style="display:flex; flex-direction:column; gap:11px;">
+                  <div style="display:flex; align-items:center; gap:12px;"><span style="flex:none; width:130px; font-size:13px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/launch</span><div style="flex:1; height:7px; border-radius:4px; background:#1c212c;"><div style="width:86%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">9.1k</span></div>
+                  <div style="display:flex; align-items:center; gap:12px;"><span style="flex:none; width:130px; font-size:13px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/pricing</span><div style="flex:1; height:7px; border-radius:4px; background:#1c212c;"><div style="width:58%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">6.0k</span></div>
+                  <div style="display:flex; align-items:center; gap:12px;"><span style="flex:none; width:130px; font-size:13px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/docs</span><div style="flex:1; height:7px; border-radius:4px; background:#1c212c;"><div style="width:40%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">4.2k</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION: DASHBOARD ===== -->
+  <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; letter-spacing:.16em; color:#75726b; margin-bottom:18px;">02 — Dashboard</div>
+  <div style="display:flex; gap:48px; align-items:flex-start;">
+
+    <!-- ---- DASHBOARD A : LIGHT ---- -->
+    <div style="flex:none; width:1280px;">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.1em; color:#75726b; margin-bottom:12px;">A · light / calm overview</div>
+      <div style="background:#f6f7f9; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.08); overflow:hidden;">
+        <!-- topbar -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 28px; background:#fff; border-bottom:1px solid #ebedf1;">
+          <div style="display:flex; align-items:center; gap:18px;">
+            <div style="display:flex; align-items:center; gap:9px;">
+              <div style="display:flex; flex-direction:column; gap:2px;"><div style="width:15px; height:2px; border-radius:2px; background:#14161b;"></div><div style="width:11px; height:2px; border-radius:2px; background:#14161b; opacity:.7;"></div><div style="width:13px; height:2px; border-radius:2px; background:#14161b; opacity:.45;"></div></div>
+              <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#14161b;">Stratus</span>
+            </div>
+            <span style="display:flex; align-items:center; gap:8px; font-size:13.5px; color:#3c414d; border:1px solid #e3e6eb; padding:7px 12px; border-radius:8px;">you.dev <span style="color:#9aa0ad;">▾</span></span>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:#14b86a; background:#e9f9f1; padding:7px 12px; border-radius:8px; font-weight:500;"><span style="width:7px; height:7px; border-radius:50%; background:#14b86a; animation:stratusPulse 1.6s infinite;"></span> 24 online</span>
+            <span style="font-size:13.5px; color:#3c414d; border:1px solid #e3e6eb; padding:7px 14px; border-radius:8px;">Last 30 days <span style="color:#9aa0ad;">▾</span></span>
+          </div>
+        </div>
+        <div style="padding:30px 28px 34px;">
+          <!-- stat row -->
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:22px;">
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:18px 20px;">
+              <div style="font-size:13px; color:#6b7180; margin-bottom:10px;">Unique visitors</div>
+              <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:30px; color:#14161b; letter-spacing:-.02em;">48.2K</span><span style="font-size:12.5px; color:#14b86a; font-weight:600;">↑ 12%</span></div>
+            </div>
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:18px 20px;">
+              <div style="font-size:13px; color:#6b7180; margin-bottom:10px;">Pageviews</div>
+              <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:30px; color:#14161b; letter-spacing:-.02em;">91.7K</span><span style="font-size:12.5px; color:#14b86a; font-weight:600;">↑ 8%</span></div>
+            </div>
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:18px 20px;">
+              <div style="font-size:13px; color:#6b7180; margin-bottom:10px;">Bounce rate</div>
+              <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:30px; color:#14161b; letter-spacing:-.02em;">38%</span><span style="font-size:12.5px; color:#d05a4a; font-weight:600;">↑ 2%</span></div>
+            </div>
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:18px 20px;">
+              <div style="font-size:13px; color:#6b7180; margin-bottom:10px;">Avg. visit time</div>
+              <div style="display:flex; align-items:baseline; gap:9px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:30px; color:#14161b; letter-spacing:-.02em;">2m 14s</span><span style="font-size:12.5px; color:#14b86a; font-weight:600;">↑ 6%</span></div>
+            </div>
+          </div>
+          <!-- chart -->
+          <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:22px 24px; margin-bottom:22px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+              <div style="display:flex; gap:8px;">
+                <span style="font-size:13px; font-weight:600; color:#fff; background:#2f6bf0; padding:7px 14px; border-radius:7px;">Visitors</span>
+                <span style="font-size:13px; font-weight:500; color:#6b7180; background:#f2f3f6; padding:7px 14px; border-radius:7px;">Pageviews</span>
+              </div>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#9aa0ad;">May 22 — Jun 21</span>
+            </div>
+            <svg viewBox="0 0 1180 300" style="width:100%; height:280px; display:block;">
+              <defs><linearGradient id="areaA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f6bf0" stop-opacity=".18"/><stop offset="1" stop-color="#2f6bf0" stop-opacity="0"/></linearGradient></defs>
+              <line x1="0" y1="40" x2="1180" y2="40" stroke="#eef0f3" stroke-width="1"/>
+              <line x1="0" y1="110" x2="1180" y2="110" stroke="#eef0f3" stroke-width="1"/>
+              <line x1="0" y1="180" x2="1180" y2="180" stroke="#eef0f3" stroke-width="1"/>
+              <line x1="0" y1="250" x2="1180" y2="250" stroke="#eef0f3" stroke-width="1"/>
+              <path d="M0,210 L98,186 L196,224 L294,150 L393,176 L491,120 L589,160 L688,96 L786,140 L884,78 L983,122 L1081,70 L1180,104 L1180,250 L0,250 Z" fill="url(#areaA)"/>
+              <path d="M0,210 L98,186 L196,224 L294,150 L393,176 L491,120 L589,160 L688,96 L786,140 L884,78 L983,122 L1081,70 L1180,104" fill="none" stroke="#2f6bf0" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="1081" cy="70" r="4.5" fill="#2f6bf0" stroke="#fff" stroke-width="2.5"/>
+            </svg>
+            <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:11px; color:#9aa0ad; margin-top:8px;">
+              <span>May 22</span><span>May 29</span><span>Jun 5</span><span>Jun 12</span><span>Jun 19</span>
+            </div>
+          </div>
+          <!-- bottom grid -->
+          <div style="display:grid; grid-template-columns:1fr 1fr 1.15fr; gap:16px;">
+            <!-- top pages -->
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:20px 22px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#14161b; margin-bottom:18px;">Top pages</div>
+              <div style="display:flex; flex-direction:column; gap:14px;">
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="font-family:'JetBrains Mono',monospace; color:#3c414d;">/launch</span><span style="color:#6b7180;">18.4k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:92%; height:100%; border-radius:4px; background:#2f6bf0;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="font-family:'JetBrains Mono',monospace; color:#3c414d;">/</span><span style="color:#6b7180;">14.1k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:70%; height:100%; border-radius:4px; background:#2f6bf0;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="font-family:'JetBrains Mono',monospace; color:#3c414d;">/pricing</span><span style="color:#6b7180;">9.7k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:48%; height:100%; border-radius:4px; background:#2f6bf0;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="font-family:'JetBrains Mono',monospace; color:#3c414d;">/docs</span><span style="color:#6b7180;">6.3k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:32%; height:100%; border-radius:4px; background:#2f6bf0;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="font-family:'JetBrains Mono',monospace; color:#3c414d;">/blog/v2</span><span style="color:#6b7180;">3.9k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:20%; height:100%; border-radius:4px; background:#2f6bf0;"></div></div></div>
+              </div>
+            </div>
+            <!-- referrers -->
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:20px 22px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#14161b; margin-bottom:18px;">Top referrers</div>
+              <div style="display:flex; flex-direction:column; gap:14px;">
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="color:#3c414d;">Hacker News</span><span style="color:#6b7180;">11.2k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:88%; height:100%; border-radius:4px; background:#7a5cff;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="color:#3c414d;">Google</span><span style="color:#6b7180;">8.4k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:66%; height:100%; border-radius:4px; background:#7a5cff;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="color:#3c414d;">GitHub</span><span style="color:#6b7180;">5.1k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:40%; height:100%; border-radius:4px; background:#7a5cff;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="color:#3c414d;">Reddit</span><span style="color:#6b7180;">3.3k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:26%; height:100%; border-radius:4px; background:#7a5cff;"></div></div></div>
+                <div><div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;"><span style="color:#3c414d;">Direct</span><span style="color:#6b7180;">2.0k</span></div><div style="height:6px; border-radius:4px; background:#eef0f3;"><div style="width:16%; height:100%; border-radius:4px; background:#7a5cff;"></div></div></div>
+              </div>
+            </div>
+            <!-- geo -->
+            <div style="background:#fff; border:1px solid #ebedf1; border-radius:12px; padding:20px 22px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#14161b; margin-bottom:16px;">Visitors by country</div>
+              <div style="height:96px; border-radius:9px; background:repeating-linear-gradient(135deg,#f3f5f8,#f3f5f8 7px,#eef1f5 7px,#eef1f5 14px); display:flex; align-items:center; justify-content:center; margin-bottom:16px; border:1px solid #eef0f3;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#aab0bc;">▦ world map placeholder</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:13px;">
+                <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:78px; font-size:13px; color:#3c414d;">🇺🇸 US</span><div style="flex:1; height:6px; border-radius:4px; background:#eef0f3;"><div style="width:82%; height:100%; border-radius:4px; background:#14b86a;"></div></div><span style="flex:none; font-size:12px; color:#6b7180; width:38px; text-align:right;">19.8k</span></div>
+                <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:78px; font-size:13px; color:#3c414d;">🇩🇪 DE</span><div style="flex:1; height:6px; border-radius:4px; background:#eef0f3;"><div style="width:54%; height:100%; border-radius:4px; background:#14b86a;"></div></div><span style="flex:none; font-size:12px; color:#6b7180; width:38px; text-align:right;">8.1k</span></div>
+                <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:78px; font-size:13px; color:#3c414d;">🇬🇧 UK</span><div style="flex:1; height:6px; border-radius:4px; background:#eef0f3;"><div style="width:42%; height:100%; border-radius:4px; background:#14b86a;"></div></div><span style="flex:none; font-size:12px; color:#6b7180; width:38px; text-align:right;">6.2k</span></div>
+                <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:78px; font-size:13px; color:#3c414d;">🇮🇳 IN</span><div style="flex:1; height:6px; border-radius:4px; background:#eef0f3;"><div style="width:30%; height:100%; border-radius:4px; background:#14b86a;"></div></div><span style="flex:none; font-size:12px; color:#6b7180; width:38px; text-align:right;">4.4k</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- DASHBOARD B : DARK DENSE ---- -->
+    <div style="flex:none; width:1280px;">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.1em; color:#75726b; margin-bottom:12px;">B · dark / data-dense, sidebar</div>
+      <div style="background:#0a0c11; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.18); overflow:hidden; display:flex;">
+        <!-- sidebar -->
+        <div style="flex:none; width:210px; background:#0d1016; border-right:1px solid #1b1f29; padding:22px 16px; display:flex; flex-direction:column;">
+          <div style="display:flex; align-items:center; gap:9px; padding:0 8px; margin-bottom:30px;">
+            <div style="display:flex; flex-direction:column; gap:2px;"><div style="width:15px; height:2px; border-radius:2px; background:#4d86ff;"></div><div style="width:11px; height:2px; border-radius:2px; background:#4d86ff; opacity:.7;"></div><div style="width:13px; height:2px; border-radius:2px; background:#4d86ff; opacity:.45;"></div></div>
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;">Stratus</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:9px; background:#161a23; border:1px solid #232838; border-radius:9px; padding:9px 11px; margin-bottom:24px;">
+            <span style="width:8px; height:8px; border-radius:2px; background:#4d86ff;"></span>
+            <span style="font-size:13px; color:#e8eaef; flex:1;">you.dev</span>
+            <span style="color:#6a7184; font-size:12px;">▾</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; background:rgba(77,134,255,.12); color:#9fb4ff; font-size:13.5px; font-weight:500;"><span style="width:14px; height:14px; border-radius:3px; background:#4d86ff;"></span> Overview</div>
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; color:#8b92a4; font-size:13.5px;"><span style="width:14px; height:14px; border-radius:3px; border:1.5px solid #3a4150;"></span> Pages</div>
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; color:#8b92a4; font-size:13.5px;"><span style="width:14px; height:14px; border-radius:50%; border:1.5px solid #3a4150;"></span> Sources</div>
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; color:#8b92a4; font-size:13.5px;"><span style="width:14px; height:14px; border-radius:3px; border:1.5px solid #3a4150;"></span> Geography</div>
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; color:#8b92a4; font-size:13.5px;"><span style="width:14px; height:14px; border-radius:3px; border:1.5px solid #3a4150;"></span> Events</div>
+            <div style="display:flex; align-items:center; gap:11px; padding:10px 11px; border-radius:8px; color:#8b92a4; font-size:13.5px;"><span style="width:14px; height:14px; border-radius:3px; border:1.5px solid #3a4150;"></span> Settings</div>
+          </div>
+          <div style="margin-top:auto; background:#161a23; border:1px solid #232838; border-radius:10px; padding:14px;">
+            <div style="font-size:12px; color:#9aa1b2; line-height:1.5; margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6a7184;">cpu 3ms · d1 ok</div>
+          </div>
+        </div>
+        <!-- main -->
+        <div style="flex:1; min-width:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 26px; border-bottom:1px solid #1b1f29;">
+            <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:17px; color:#fff;">Overview</div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:#2bd888; background:rgba(43,216,136,.1); padding:7px 12px; border-radius:8px; font-weight:500;"><span style="width:7px; height:7px; border-radius:50%; background:#2bd888; animation:stratusPulse 1.6s infinite;"></span> 24 online now</span>
+              <span style="font-size:13px; color:#cfd4e0; border:1px solid #262b38; padding:7px 14px; border-radius:8px;">Last 30 days ▾</span>
+            </div>
+          </div>
+          <div style="padding:24px 26px 30px;">
+            <!-- stat row -->
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px;">
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:16px 18px;"><div style="font-size:12.5px; color:#8b92a4; margin-bottom:9px;">Visitors</div><div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:27px; color:#fff;">48.2K</span><span style="font-size:12px; color:#2bd888; font-weight:600;">↑12%</span></div></div>
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:16px 18px;"><div style="font-size:12.5px; color:#8b92a4; margin-bottom:9px;">Pageviews</div><div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:27px; color:#fff;">91.7K</span><span style="font-size:12px; color:#2bd888; font-weight:600;">↑8%</span></div></div>
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:16px 18px;"><div style="font-size:12.5px; color:#8b92a4; margin-bottom:9px;">Bounce</div><div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:27px; color:#fff;">38%</span><span style="font-size:12px; color:#e08571; font-weight:600;">↑2%</span></div></div>
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:16px 18px;"><div style="font-size:12.5px; color:#8b92a4; margin-bottom:9px;">Avg. time</div><div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:27px; color:#fff;">2m14s</span><span style="font-size:12px; color:#2bd888; font-weight:600;">↑6%</span></div></div>
+            </div>
+            <!-- chart -->
+            <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:20px 22px; margin-bottom:20px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+                <div style="display:flex; gap:7px;">
+                  <span style="font-size:12.5px; font-weight:600; color:#fff; background:#4d86ff; padding:6px 13px; border-radius:7px;">Visitors</span>
+                  <span style="font-size:12.5px; font-weight:500; color:#9aa1b2; background:#1a1f2a; padding:6px 13px; border-radius:7px;">Pageviews</span>
+                </div>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6a7184;">May 22 — Jun 21</span>
+              </div>
+              <svg viewBox="0 0 980 240" style="width:100%; height:240px; display:block;">
+                <defs><linearGradient id="areaB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d86ff" stop-opacity=".28"/><stop offset="1" stop-color="#4d86ff" stop-opacity="0"/></linearGradient></defs>
+                <line x1="0" y1="40" x2="980" y2="40" stroke="#1a1f2a" stroke-width="1"/>
+                <line x1="0" y1="100" x2="980" y2="100" stroke="#1a1f2a" stroke-width="1"/>
+                <line x1="0" y1="160" x2="980" y2="160" stroke="#1a1f2a" stroke-width="1"/>
+                <path d="M0,170 L81,150 L163,184 L245,120 L327,142 L409,96 L490,128 L572,76 L654,112 L736,62 L817,98 L899,54 L980,82 L980,200 L0,200 Z" fill="url(#areaB)"/>
+                <path d="M0,170 L81,150 L163,184 L245,120 L327,142 L409,96 L490,128 L572,76 L654,112 L736,62 L817,98 L899,54 L980,82" fill="none" stroke="#4d86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="899" cy="54" r="4.5" fill="#4d86ff" stroke="#0a0c11" stroke-width="2.5"/>
+              </svg>
+              <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#6a7184; margin-top:6px;"><span>May 22</span><span>May 29</span><span>Jun 5</span><span>Jun 12</span><span>Jun 19</span></div>
+            </div>
+            <!-- bottom -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:18px 20px;">
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; color:#fff; margin-bottom:16px;">Top pages</div>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:96px; font-size:12.5px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/launch</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:92%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">18.4k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:96px; font-size:12.5px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:70%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">14.1k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:96px; font-size:12.5px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/pricing</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:48%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">9.7k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:96px; font-size:12.5px; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">/docs</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:32%; height:100%; border-radius:4px; background:#4d86ff;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">6.3k</span></div>
+                </div>
+              </div>
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:11px; padding:18px 20px;">
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; color:#fff; margin-bottom:16px;">Visitors by country</div>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:64px; font-size:12.5px; color:#cfd4e0;">🇺🇸 US</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:82%; height:100%; border-radius:4px; background:#2bd888;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">19.8k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:64px; font-size:12.5px; color:#cfd4e0;">🇩🇪 DE</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:54%; height:100%; border-radius:4px; background:#2bd888;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">8.1k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:64px; font-size:12.5px; color:#cfd4e0;">🇬🇧 UK</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:42%; height:100%; border-radius:4px; background:#2bd888;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">6.2k</span></div>
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:64px; font-size:12.5px; color:#cfd4e0;">🇮🇳 IN</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="width:30%; height:100%; border-radius:4px; background:#2bd888;"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:40px; text-align:right;">4.4k</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
+

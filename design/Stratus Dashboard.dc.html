@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/jsvectormap.min.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background:#0a0c11; }
+  @keyframes stratusPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #232838; border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  .jvm-container { background: transparent !important; }
+  .jvm-tooltip { background:#12151d !important; border:1px solid #2a3040 !important; color:#e8eaef !important; font-family:'Hanken Grotesk',sans-serif !important; border-radius:9px !important; padding:9px 12px !important; box-shadow:0 12px 34px rgba(0,0,0,.6) !important; font-size:13px !important; }
+</style>
+</helmet>
+
+<div style="display:flex; height:100vh; background:#0a0c11; font-family:'Hanken Grotesk',sans-serif; color:#e8eaef;">
+
+  <!-- ===== SIDEBAR ===== -->
+  <div style="flex:none; width:224px; background:#0d1016; border-right:1px solid #1b1f29; padding:24px 16px; display:flex; flex-direction:column;">
+    <div style="display:flex; align-items:center; gap:9px; padding:0 8px; margin-bottom:30px;">
+      <div style="display:flex; flex-direction:column; gap:2px;"><div style="width:15px; height:2px; border-radius:2px; background:#4d86ff;"></div><div style="width:11px; height:2px; border-radius:2px; background:#4d86ff; opacity:.7;"></div><div style="width:13px; height:2px; border-radius:2px; background:#4d86ff; opacity:.45;"></div></div>
+      <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;">Stratus</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:9px; background:#161a23; border:1px solid #232838; border-radius:9px; padding:10px 11px; margin-bottom:24px;">
+      <span style="width:8px; height:8px; border-radius:2px; background:#4d86ff;"></span>
+      <span style="font-size:13px; color:#e8eaef; flex:1;">you.dev</span>
+      <span style="color:#6a7184; font-size:12px;">▾</span>
+    </div>
+    <sc-for list="{{ navItems }}" as="it" hint-placeholder-count="6">
+      <div onClick="{{ it.onClick }}" style="{{ it.style }}">
+        <span style="{{ it.dot }}"></span> {{ it.label }}
+      </div>
+    </sc-for>
+    <div style="margin-top:auto; background:#161a23; border:1px solid #232838; border-radius:10px; padding:14px;">
+      <div style="font-size:12px; color:#9aa1b2; line-height:1.5; margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6a7184;">cpu 3ms · d1 ok</div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN ===== -->
+  <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+    <!-- header -->
+    <div style="flex:none; display:flex; align-items:center; justify-content:space-between; padding:20px 32px; border-bottom:1px solid #1b1f29;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:19px; color:#fff;">{{ viewTitle }}</div>
+      <div style="display:flex; align-items:center; gap:12px; position:relative;">
+        <span style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:#2bd888; background:rgba(43,216,136,.1); padding:8px 13px; border-radius:8px; font-weight:500;"><span style="width:7px; height:7px; border-radius:50%; background:#2bd888; animation:stratusPulse 1.6s infinite;"></span> {{ onlineCount }} online now</span>
+        <div style="position:relative;">
+          <div onClick="{{ toggleRange }}" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#cfd4e0; border:1px solid #262b38; padding:8px 15px; border-radius:8px; user-select:none;">{{ rangeLabel }} <span style="color:#6a7184;">▾</span></div>
+          <sc-if value="{{ rangeOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; right:0; top:42px; z-index:30; background:#12151d; border:1px solid #262b38; border-radius:10px; padding:6px; box-shadow:0 16px 40px rgba(0,0,0,.6); min-width:170px;">
+              <sc-for list="{{ rangeOptions }}" as="r" hint-placeholder-count="4">
+                <div onClick="{{ r.onClick }}" style="{{ r.style }}">{{ r.label }}</div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+
+    <!-- content -->
+    <div style="flex:1; overflow:auto; padding:28px 32px 40px;">
+
+      <!-- ===== OVERVIEW ===== -->
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px;">
+            <sc-for list="{{ statCards }}" as="s" hint-placeholder-count="4">
+              <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:18px 20px;">
+                <div style="font-size:12.5px; color:#8b92a4; margin-bottom:10px;">{{ s.label }}</div>
+                <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:28px; color:#fff; letter-spacing:-.01em;">{{ s.value }}</span><span style="{{ s.deltaStyle }}">{{ s.delta }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- chart -->
+          <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:22px 24px; margin-bottom:20px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+              <div style="display:flex; gap:7px;">
+                <span onClick="{{ setVisitors }}" style="{{ metricVisitorsStyle }}">Visitors</span>
+                <span onClick="{{ setPageviews }}" style="{{ metricPageviewsStyle }}">Pageviews</span>
+              </div>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6a7184;">{{ rangeLabel }}</span>
+            </div>
+            <div style="position:relative; height:250px;" onMouseLeave="{{ onChartLeave }}">
+              <svg viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%; height:100%; display:block;">
+                <defs><linearGradient id="areaDash" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d86ff" stop-opacity=".30"/><stop offset="1" stop-color="#4d86ff" stop-opacity="0"/></linearGradient></defs>
+                <line x1="0" y1="46" x2="1000" y2="46" stroke="#1a1f2a" stroke-width="1"/>
+                <line x1="0" y1="110" x2="1000" y2="110" stroke="#1a1f2a" stroke-width="1"/>
+                <line x1="0" y1="174" x2="1000" y2="174" stroke="#1a1f2a" stroke-width="1"/>
+                <path d="{{ areaPath }}" fill="url(#areaDash)"></path>
+                <path d="{{ linePath }}" fill="none" stroke="#4d86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+              </svg>
+              <sc-if value="{{ hasHover }}" hint-placeholder-val="{{ false }}">
+                <div style="{{ hoverLineStyle }}"></div>
+                <div style="{{ hoverDotStyle }}"></div>
+                <div style="{{ tooltipStyle }}">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9aa1b2; margin-bottom:6px;">{{ hoverLabel }}</div>
+                  <div style="display:flex; align-items:center; gap:7px; font-size:13px; color:#fff; white-space:nowrap;"><span style="width:8px; height:8px; border-radius:2px; background:#4d86ff;"></span> {{ hoverVisitors }} visitors</div>
+                  <div style="display:flex; align-items:center; gap:7px; font-size:13px; color:#cfd4e0; white-space:nowrap; margin-top:3px;"><span style="width:8px; height:8px; border-radius:2px; background:#6a7184;"></span> {{ hoverPageviews }} views</div>
+                </div>
+              </sc-if>
+              <div style="position:absolute; inset:0; display:flex;">
+                <sc-for list="{{ overlayCells }}" as="c" hint-placeholder-count="12">
+                  <div style="flex:1; height:100%; cursor:crosshair;" onMouseEnter="{{ c.onEnter }}"></div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#6a7184; margin-top:8px;">
+              <sc-for list="{{ axisLabels }}" as="a" hint-placeholder-count="5"><span>{{ a }}</span></sc-for>
+            </div>
+          </div>
+
+          <!-- top pages + sources -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:20px 22px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#fff; margin-bottom:18px;">Top pages</div>
+              <div style="display:flex; flex-direction:column; gap:13px;">
+                <sc-for list="{{ topPages }}" as="p" hint-placeholder-count="5">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:104px; font-size:12.5px; color:#cfd4e0; font-family:'JetBrains Mono',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.path }}</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="{{ p.barStyle }}"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">{{ p.count }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:20px 22px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#fff; margin-bottom:18px;">Top sources</div>
+              <div style="display:flex; flex-direction:column; gap:13px;">
+                <sc-for list="{{ topSources }}" as="r" hint-placeholder-count="5">
+                  <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:104px; font-size:12.5px; color:#cfd4e0;">{{ r.name }}</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="{{ r.barStyle }}"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">{{ r.count }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== GEOGRAPHY ===== -->
+      <sc-if value="{{ isGeo }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; gap:14px; align-items:stretch;">
+          <div style="flex:1.7; min-width:0; background:#12151d; border:1px solid #20252f; border-radius:12px; padding:22px 24px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+              <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; color:#fff;">Visitors by country</div>
+              <div style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:#6a7184; font-family:'JetBrains Mono',monospace;">low <span style="width:60px; height:7px; border-radius:4px; background:linear-gradient(90deg,#202634,#4d86ff);"></span> high</div>
+            </div>
+            <div id="stratus-map" style="width:100%; height:430px;"></div>
+          </div>
+          <div style="flex:1; min-width:0; background:#12151d; border:1px solid #20252f; border-radius:12px; padding:20px 22px;">
+            <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#fff; margin-bottom:18px;">Top countries</div>
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <sc-for list="{{ countriesGeo }}" as="c" hint-placeholder-count="8">
+                <div style="display:flex; align-items:center; gap:11px;"><span style="flex:none; width:20px; font-size:15px;">{{ c.flag }}</span><span style="flex:none; width:118px; font-size:13px; color:#cfd4e0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.name }}</span><div style="flex:1; height:6px; border-radius:4px; background:#1c212c;"><div style="{{ c.barStyle }}"></div></div><span style="flex:none; font-size:12px; color:#9aa1b2; width:42px; text-align:right;">{{ c.count }}</span></div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== PAGES ===== -->
+      <sc-if value="{{ isPages }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:8px 0; overflow:hidden;">
+          <div style="display:flex; padding:14px 24px; border-bottom:1px solid #20252f; font-family:'JetBrains Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:#6a7184;">
+            <span style="flex:1;">Page</span><span style="flex:none; width:120px; text-align:right;">Visitors</span><span style="flex:none; width:120px; text-align:right;">Pageviews</span><span style="flex:none; width:90px; text-align:right;">Bounce</span>
+          </div>
+          <sc-for list="{{ pagesTable }}" as="p" hint-placeholder-count="7">
+            <div style="display:flex; align-items:center; padding:15px 24px; border-bottom:1px solid #161a22; font-size:13.5px;">
+              <span style="flex:1; color:#cfd4e0; font-family:'JetBrains Mono',monospace;">{{ p.path }}</span>
+              <span style="flex:none; width:120px; text-align:right; color:#fff; font-weight:500;">{{ p.visitors }}</span>
+              <span style="flex:none; width:120px; text-align:right; color:#9aa1b2;">{{ p.views }}</span>
+              <span style="flex:none; width:90px; text-align:right; color:#9aa1b2;">{{ p.bounce }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ===== SOURCES ===== -->
+      <sc-if value="{{ isSources }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#12151d; border:1px solid #20252f; border-radius:12px; padding:8px 0; overflow:hidden;">
+          <div style="display:flex; padding:14px 24px; border-bottom:1px solid #20252f; font-family:'JetBrains Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:#6a7184;">
+            <span style="flex:1;">Source</span><span style="flex:none; width:120px; text-align:right;">Visitors</span><span style="flex:none; width:120px; text-align:right;">Share</span>
+          </div>
+          <sc-for list="{{ sourcesTable }}" as="r" hint-placeholder-count="6">
+            <div style="display:flex; align-items:center; padding:15px 24px; border-bottom:1px solid #161a22; font-size:13.5px;">
+              <span style="flex:1; color:#cfd4e0;">{{ r.name }}</span>
+              <span style="flex:none; width:120px; text-align:right; color:#fff; font-weight:500;">{{ r.visitors }}</span>
+              <span style="flex:none; width:120px; text-align:right; color:#9aa1b2;">{{ r.share }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ===== EVENTS / SETTINGS placeholder ===== -->
+      <sc-if value="{{ isPlaceholder }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:420px; text-align:center;">
+          <div style="width:48px; height:48px; border-radius:12px; border:1.5px solid #2a3040; display:flex; align-items:center; justify-content:center; margin-bottom:18px;"><div style="width:18px; height:18px; border-radius:5px; background:#232838;"></div></div>
+          <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:18px; color:#fff; margin-bottom:8px;">{{ viewTitle }}</div>
+          <div style="font-size:14px; color:#8b92a4; max-width:340px; line-height:1.5;">This panel isn't part of the prototype yet — explore Overview and Geography for the live, interactive views.</div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { view: 'overview', range: '30d', metric: 'visitors', hover: null, rangeOpen: false };
+
+  fmt(n) { return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : String(n); }
+
+  datasets() {
+    const mk = (v, x, axis, name) => ({ v, p: v.map(n => Math.round(n * 1.9)), x, axis, name });
+    return {
+      '24h': mk(
+        [180,120,90,140,320,520,610,580,640,720,560,410],
+        ['00:00','02:00','04:00','06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'],
+        ['00:00','06:00','12:00','18:00','22:00'], 'Last 24 hours'),
+      '7d': mk(
+        [5200,6100,5800,7200,8100,6400,5600],
+        ['Sun 15','Mon 16','Tue 17','Wed 18','Thu 19','Fri 20','Sat 21'],
+        ['Sun','Tue','Thu','Sat',''], 'Last 7 days'),
+      '30d': mk(
+        [3100,3400,3000,3800,3300,4100,3600,4400,3900,4600,4200,4800,4500],
+        ['May 22','May 24','May 27','May 30','Jun 1','Jun 4','Jun 7','Jun 10','Jun 13','Jun 16','Jun 18','Jun 20','Jun 21'],
+        ['May 22','May 29','Jun 5','Jun 12','Jun 21'], 'Last 30 days'),
+      '12mo': mk(
+        [22000,24500,21000,28000,31000,29500,34000,38000,36500,42000,45000,48200],
+        ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'],
+        ['Jul','Oct','Jan','Apr','Jun'], 'Last 12 months'),
+    };
+  }
+
+  rangeMeta() { return { '24h': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', '12mo': 'Last 12 months' }; }
+
+  bar(pct, color) { return { width: pct + '%', height: '100%', borderRadius: '4px', background: color }; }
+
+  componentDidMount() {
+    const add = (tag, attrs) => new Promise((res, rej) => {
+      const el = document.createElement(tag);
+      Object.assign(el, attrs); el.onload = res; el.onerror = rej;
+      document.head.appendChild(el);
+    });
+    add('script', { src: 'https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/jsvectormap.min.js' })
+      .then(() => add('script', { src: 'https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/maps/world.js' }))
+      .then(() => { this.libReady = true; this.maybeMap(); })
+      .catch(() => { this.libReady = false; });
+  }
+
+  componentDidUpdate() { this.maybeMap(); }
+
+  maybeMap() {
+    const onGeo = this.state.view === 'geography';
+    if (!onGeo && this.map) { try { this.map.destroy(); } catch (e) {} this.map = null; return; }
+    if (onGeo && this.libReady && !this.map && window.jsVectorMap && document.getElementById('stratus-map')) {
+      const vals = { US:19800, DE:8100, GB:6200, IN:4400, BR:3100, FR:2600, CA:2300, AU:1900, NL:1500, JP:1300, ES:1100, SE:900, PL:820, IT:760, SG:640 };
+      const fmt = this.fmt;
+      try {
+        this.map = new window.jsVectorMap({
+          selector: '#stratus-map', map: 'world',
+          backgroundColor: 'transparent', zoomButtons: false, zoomOnScroll: false,
+          regionStyle: { initial: { fill: '#1c212c', stroke: '#0d1016', strokeWidth: 0.5 }, hover: { fill: '#6a9bff' } },
+          series: { regions: [{ attribute: 'fill', scale: ['#202634', '#4d86ff'], normalizeFunction: 'polynomial', values: vals }] },
+          onRegionTooltipShow(event, tooltip, code) {
+            const v = vals[code];
+            tooltip.text(tooltip.text() + (v ? ' · ' + fmt(v) + ' visitors' : ' · no data'), false);
+          },
+        });
+      } catch (e) { this.map = null; }
+    }
+  }
+
+  renderVals() {
+    const D = this.datasets(), ds = D[this.state.range], metric = this.state.metric;
+    const setView = (v) => () => this.setState({ view: v, hover: null });
+
+    // nav
+    const nav = [
+      ['overview', 'Overview', 'sq'], ['pages', 'Pages', 'sq'], ['sources', 'Sources', 'ci'],
+      ['geography', 'Geography', 'sq'], ['events', 'Events', 'sq'], ['settings', 'Settings', 'sq'],
+    ];
+    const navItems = nav.map(([id, label, shape]) => {
+      const active = this.state.view === id;
+      return {
+        label, onClick: setView(id),
+        style: { display: 'flex', alignItems: 'center', gap: '11px', padding: '10px 11px', borderRadius: '8px', cursor: 'pointer', fontSize: '13.5px', fontWeight: active ? '500' : '400', color: active ? '#9fb4ff' : '#8b92a4', background: active ? 'rgba(77,134,255,.12)' : 'transparent' },
+        dot: { width: '14px', height: '14px', borderRadius: shape === 'ci' ? '50%' : '3px', background: active ? '#4d86ff' : 'transparent', border: active ? 'none' : '1.5px solid #3a4150' },
+      };
+    });
+
+    const titles = { overview: 'Overview', pages: 'Pages', sources: 'Sources', geography: 'Geography', events: 'Events', settings: 'Settings' };
+
+    // range dropdown
+    const rm = this.rangeMeta();
+    const rangeOptions = Object.keys(rm).map(k => ({
+      label: rm[k], onClick: () => this.setState({ range: k, rangeOpen: false, hover: null }),
+      style: { padding: '9px 12px', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', color: this.state.range === k ? '#fff' : '#9aa1b2', background: this.state.range === k ? 'rgba(77,134,255,.14)' : 'transparent' },
+    }));
+
+    // metric toggle
+    const mStyle = (on) => ({ cursor: 'pointer', fontSize: '12.5px', fontWeight: on ? '600' : '500', color: on ? '#fff' : '#9aa1b2', background: on ? '#4d86ff' : '#1a1f2a', padding: '7px 14px', borderRadius: '7px', userSelect: 'none' });
+
+    // chart geometry
+    const arr = metric === 'visitors' ? ds.v : ds.p;
+    const n = arr.length, VW = 1000, VH = 260, padT = 18, padB = 30, plotH = VH - padT - padB;
+    const lo = Math.min(...arr) * 0.72, hi = Math.max(...arr) * 1.08;
+    const X = i => n > 1 ? (i / (n - 1)) * VW : 0;
+    const Y = val => padT + (1 - (val - lo) / (hi - lo)) * plotH;
+    const pts = arr.map((val, i) => ({ x: X(i), y: Y(val), leftPct: n > 1 ? (i / (n - 1)) * 100 : 0, topPct: (Y(val) / VH) * 100 }));
+    const linePath = 'M' + pts.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' L ');
+    const areaPath = linePath + ' L' + VW + ',' + (VH - padB) + ' L0,' + (VH - padB) + ' Z';
+    const overlayCells = arr.map((_, i) => ({ onEnter: () => this.setState({ hover: i }) }));
+
+    // hover
+    const h = this.state.hover, hasHover = h != null;
+    let hoverLineStyle = null, hoverDotStyle = null, tooltipStyle = null, hoverLabel = '', hoverVisitors = '', hoverPageviews = '';
+    if (hasHover) {
+      const p = pts[h];
+      hoverLineStyle = { position: 'absolute', left: p.leftPct + '%', top: 0, height: '100%', width: '1px', background: 'rgba(77,134,255,.35)', pointerEvents: 'none' };
+      hoverDotStyle = { position: 'absolute', left: p.leftPct + '%', top: p.topPct + '%', transform: 'translate(-50%,-50%)', width: '11px', height: '11px', borderRadius: '50%', background: '#4d86ff', boxShadow: '0 0 0 4px rgba(77,134,255,.18)', pointerEvents: 'none' };
+      const tx = p.leftPct > 78 ? '-92%' : (p.leftPct < 14 ? '-8%' : '-50%');
+      tooltipStyle = { position: 'absolute', left: p.leftPct + '%', top: p.topPct + '%', transform: 'translate(' + tx + ', calc(-100% - 16px))', background: '#0d1016', border: '1px solid #2a3040', borderRadius: '10px', padding: '11px 13px', boxShadow: '0 14px 34px rgba(0,0,0,.6)', pointerEvents: 'none', zIndex: 5 };
+      hoverLabel = ds.x[h]; hoverVisitors = this.fmt(ds.v[h]); hoverPageviews = this.fmt(ds.p[h]);
+    }
+
+    // stat cards
+    const sumV = ds.v.reduce((a, b) => a + b, 0), sumP = ds.p.reduce((a, b) => a + b, 0);
+    const up = { fontSize: '12px', color: '#2bd888', fontWeight: '600' }, down = { fontSize: '12px', color: '#e08571', fontWeight: '600' };
+    const statCards = [
+      { label: 'Visitors', value: this.fmt(sumV), delta: '↑12%', deltaStyle: up },
+      { label: 'Pageviews', value: this.fmt(sumP), delta: '↑8%', deltaStyle: up },
+      { label: 'Bounce', value: '38%', delta: '↑2%', deltaStyle: down },
+      { label: 'Avg. time', value: '2m14s', delta: '↑6%', deltaStyle: up },
+    ];
+
+    // tables / lists
+    const pagesData = [['/launch', 18400], ['/', 14100], ['/pricing', 9700], ['/docs', 6300], ['/blog/v2', 3900], ['/changelog', 2600], ['/about', 1800]];
+    const srcData = [['Hacker News', 11200], ['Google', 8400], ['GitHub', 5100], ['Reddit', 3300], ['Twitter / X', 2400], ['Direct', 2000]];
+    const geoData = [['🇺🇸', 'United States', 19800], ['🇩🇪', 'Germany', 8100], ['🇬🇧', 'United Kingdom', 6200], ['🇮🇳', 'India', 4400], ['🇧🇷', 'Brazil', 3100], ['🇫🇷', 'France', 2600], ['🇨🇦', 'Canada', 2300], ['🇦🇺', 'Australia', 1900], ['🇳🇱', 'Netherlands', 1500], ['🇯🇵', 'Japan', 1300]];
+    const pMax = pagesData[0][1], sMax = srcData[0][1], gMax = geoData[0][1];
+    const sTot = srcData.reduce((a, b) => a + b[1], 0);
+
+    const topPages = pagesData.slice(0, 5).map(([path, c]) => ({ path, count: this.fmt(c), barStyle: this.bar(Math.round(c / pMax * 100), '#4d86ff') }));
+    const topSources = srcData.slice(0, 5).map(([name, c]) => ({ name, count: this.fmt(c), barStyle: this.bar(Math.round(c / sMax * 100), '#7a5cff') }));
+    const countriesGeo = geoData.map(([flag, name, c]) => ({ flag, name, count: this.fmt(c), barStyle: this.bar(Math.round(c / gMax * 100), '#2bd888') }));
+    const pagesTable = pagesData.map(([path, c], i) => ({ path, visitors: this.fmt(c), views: this.fmt(Math.round(c * 1.9)), bounce: [42, 31, 47, 28, 55, 38, 61][i] + '%' }));
+    const sourcesTable = srcData.map(([name, c]) => ({ name, visitors: this.fmt(c), share: Math.round(c / sTot * 100) + '%' }));
+
+    return {
+      navItems, viewTitle: titles[this.state.view], onlineCount: 24,
+      rangeLabel: rm[this.state.range], rangeOpen: this.state.rangeOpen, toggleRange: () => this.setState(s => ({ rangeOpen: !s.rangeOpen })), rangeOptions,
+      isOverview: this.state.view === 'overview', isGeo: this.state.view === 'geography',
+      isPages: this.state.view === 'pages', isSources: this.state.view === 'sources',
+      isPlaceholder: this.state.view === 'events' || this.state.view === 'settings',
+      setVisitors: () => this.setState({ metric: 'visitors' }), setPageviews: () => this.setState({ metric: 'pageviews' }),
+      metricVisitorsStyle: mStyle(metric === 'visitors'), metricPageviewsStyle: mStyle(metric === 'pageviews'),
+      linePath, areaPath, overlayCells, axisLabels: ds.axis, onChartLeave: () => this.setState({ hover: null }),
+      hasHover, hoverLineStyle, hoverDotStyle, tooltipStyle, hoverLabel, hoverVisitors, hoverPageviews,
+      statCards, topPages, topSources, countriesGeo, pagesTable, sourcesTable,
+    };
+  }
+}
+</script>
+</body>
+</html>

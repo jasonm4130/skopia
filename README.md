@@ -34,6 +34,7 @@ Research → `docs/research/` · Specs → `docs/specs/` · Decisions → `docs/
 
 ```
 .claude/agents/   PM + tech-lead agent definitions
+design/           Frontend design system (Claude Design source — visual/behavioral spec)
 docs/research/    Deep-dive research (competitive analysis, Cloudflare architecture)
 docs/specs/       Approved design specs
 docs/decisions/   Architecture Decision Records (ADRs)
