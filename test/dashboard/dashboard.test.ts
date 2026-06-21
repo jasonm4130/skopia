@@ -306,6 +306,60 @@ describe("/public/:token", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stat-card labels (Task 5 — honest "bounce rate" relabel)
+// ---------------------------------------------------------------------------
+
+describe("stat-card labels", () => {
+  it("renders the 'Single-Page Visits' label, not 'Bounce Rate'", async () => {
+    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
+    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    expect(text).toContain("Single-Page Visits");
+    expect(text).not.toContain("Bounce Rate");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CSP nonce on inline scripts (Task 4)
+// ---------------------------------------------------------------------------
+
+/** Sign a valid session cookie using the test env's AUTH_COOKIE_SECRET. */
+async function authedCookie(): Promise<string> {
+  const secret = (env as { AUTH_COOKIE_SECRET?: string }).AUTH_COOKIE_SECRET ?? "test-secret";
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const payload = `1|${expiry}`;
+  const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payload));
+  const sigHex = Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return encodeURIComponent(`${payload}.${sigHex}`);
+}
+
+describe("CSP nonce", () => {
+  it("authed /app inline <script> carries a nonce= attribute", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app", { headers: { Cookie: `stratus_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    // Every inline <script> (no src) must be nonced for strict-dynamic CSP.
+    expect(text).toMatch(/<script nonce="[a-f0-9]+">/);
+    // No un-nonced inline script blocks.
+    expect(text).not.toMatch(/<script>\s*\n/);
+    // The CSP header from the root middleware advertises the same nonce.
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sampled badge
 // ---------------------------------------------------------------------------
 

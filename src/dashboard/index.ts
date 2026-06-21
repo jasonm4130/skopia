@@ -20,6 +20,9 @@
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import type { Env, BreakdownRow, DateRange, TimeSeriesPoint, StatCards, SiteRow } from "../shared/types";
+import type { AppEnv } from "../shared/security-headers";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { ensureSchema } from "../shared/schema";
 import {
   getOwner,
   listSites,
@@ -38,15 +41,28 @@ export { SiteLive } from "./site-live";
 // Types
 // ---------------------------------------------------------------------------
 
-type Variables = {
-  userId: number;
+// Dashboard env = the root AppEnv (Bindings + per-request nonce) plus the
+// userId set by requireAuth. Keeps `c.get("nonce")` typed from the shared
+// middleware while preserving the auth variable.
+type DashEnv = {
+  Bindings: AppEnv["Bindings"];
+  Variables: AppEnv["Variables"] & { userId: number };
 };
 
 // ---------------------------------------------------------------------------
 // Hono sub-app
 // ---------------------------------------------------------------------------
 
-export const dashboard = new Hono<{ Bindings: Env; Variables: Variables }>();
+export const dashboard = new Hono<DashEnv>();
+
+// Cold-account D1 bootstrap. Registered first so it runs before any route
+// handler (and before requireAuth) reads D1 — on a fresh account the migration
+// has never run, so getOwner()'s SELECT would 500. ensureSchema is idempotent
+// and cached per isolate, so this is cheap on warm requests.
+dashboard.use("*", async (c, next) => {
+  await ensureSchema(c.env.DB);
+  await next();
+});
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -219,9 +235,22 @@ function fmtPct(r: number): string {
 // ---------------------------------------------------------------------------
 
 async function requireAuth(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
+  c: Context<DashEnv>,
   next: Next,
 ): Promise<Response | void> {
+  // Fail closed: on a cold deploy AUTH_COOKIE_SECRET may be unset. Reading a
+  // stale session cookie would pass undefined/"" into the HMAC import and throw
+  // an unhandled 500. Guard before touching the cookie and surface a clear
+  // "not configured" page instead.
+  try {
+    requireSecrets(c.env, ["AUTH_COOKIE_SECRET"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      return c.html(notConfiguredPage(c.get("nonce"), err.missing), 500);
+    }
+    throw err;
+  }
+
   const cookies = parseCookies(c.req.header("cookie") ?? null);
   const cookieVal = cookies[COOKIE_NAME];
   if (cookieVal) {
@@ -238,13 +267,36 @@ async function requireAuth(
 // Layout / shared HTML
 // ---------------------------------------------------------------------------
 
-const FONTS = `
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-`.trim();
+// Self-hosted @font-face — vendored woff2 served from /fonts by the Workers
+// Static Assets layer (Task 3). Zero third-party requests: no Google Fonts.
+// One @font-face per weight/subset; unicode-range lets the browser fetch only
+// the latin or latin-ext file it needs. font-display:swap avoids FOIT.
+const LATIN =
+  "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD";
+const LATIN_EXT =
+  "U+0100-02AF,U+0304,U+0308,U+0329,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF";
+
+function fontFace(family: string, file: string, weight: number, range: string): string {
+  return `@font-face{font-family:'${family}';font-style:normal;font-weight:${weight};font-display:swap;src:url('/fonts/${file}.woff2') format('woff2');unicode-range:${range};}`;
+}
+
+function fontFaces(family: string, prefix: string, weights: number[]): string {
+  return weights
+    .flatMap((w) => [
+      fontFace(family, `${prefix}-${w}-latin`, w, LATIN),
+      fontFace(family, `${prefix}-${w}-latin-ext`, w, LATIN_EXT),
+    ])
+    .join("");
+}
+
+const FONT_FACES = [
+  fontFaces("Space Grotesk", "space-grotesk", [400, 500, 600, 700]),
+  fontFaces("Hanken Grotesk", "hanken-grotesk", [400, 500, 600, 700]),
+  fontFaces("JetBrains Mono", "jetbrains-mono", [400, 500]),
+].join("");
 
 const BASE_CSS = `
+  ${FONT_FACES}
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:#0a0c11;}
   body{font-family:'Hanken Grotesk',sans-serif;color:#e8eaef;}
@@ -256,15 +308,14 @@ const BASE_CSS = `
   @keyframes stratusPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 `.trim();
 
-function htmlDoc(title: string, head: string, body: string): string {
+function htmlDoc(title: string, head: string, body: string, nonce: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Stratus</title>
-${FONTS}
-<style>${BASE_CSS}</style>
+<style nonce="${nonce}">${BASE_CSS}</style>
 ${head}
 </head>
 <body>
@@ -383,7 +434,7 @@ function statCardsHtml(cards: StatCards, sampled: boolean): string {
     { label: "Visitors", value: fmtNum(cards.visitors) },
     { label: "Pageviews", value: fmtNum(cards.pageviews) },
     { label: "Views / Visitor", value: cards.viewsPerVisitor.toFixed(1) },
-    { label: "Bounce Rate", value: fmtPct(cards.bounceRate) },
+    { label: "Single-Page Visits", value: fmtPct(cards.bounceRate) },
   ];
   const badge = sampled
     ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
@@ -411,6 +462,7 @@ function timeSeriesChartHtml(
   rangeLabel: string,
   _siteId: string,
   _rangeKey: string,
+  nonce: string,
 ): string {
   if (series.length === 0) {
     return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;margin-bottom:20px;">
@@ -484,7 +536,7 @@ function timeSeriesChartHtml(
   </div>
   <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6a7184;margin-top:8px;">${axisLabels}</div>
 </div>
-<script>
+<script nonce="${nonce}">
 (function(){
   var series=${seriesJson};
   var metric='visitors';
@@ -619,8 +671,8 @@ function breakdownTable(
 // Live WebSocket client script (inserted into auth'd app pages)
 // ---------------------------------------------------------------------------
 
-function liveScript(siteId: string): string {
-  return `<script>
+function liveScript(siteId: string, nonce: string): string {
+  return `<script nonce="${nonce}">
 (function(){
   var siteId=${JSON.stringify(siteId)};
   function connect(){
@@ -644,7 +696,7 @@ function liveScript(siteId: string): string {
 // Login / setup pages
 // ---------------------------------------------------------------------------
 
-function loginPage(error?: string): string {
+function loginPage(nonce: string, error?: string): string {
   const errorHtml = error
     ? `<div style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
     : "";
@@ -674,10 +726,37 @@ function loginPage(error?: string): string {
       </div>
     </div>
   </div>`,
+    nonce,
   );
 }
 
-function setupPage(error?: string): string {
+/**
+ * Fail-closed "not configured" page (HTTP 500). Shown when a required deploy
+ * secret is unset, instead of signing a cookie with `undefined`.
+ */
+function notConfiguredPage(nonce: string, missing: string[]): string {
+  const names = missing.map((m) => `<code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc(m)}</code>`).join(", ");
+  return htmlDoc(
+    "Not configured",
+    "",
+    `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
+    <div style="width:440px;background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
+      <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:12px;">Not configured</div>
+      <div style="font-size:13.5px;color:#cfd4e0;line-height:1.6;margin-bottom:14px;">
+        This Stratus instance is missing required secret${missing.length > 1 ? "s" : ""}: ${names}.
+        Sessions cannot be signed safely until ${missing.length > 1 ? "they are" : "it is"} set.
+      </div>
+      <div style="font-size:13px;color:#9aa1b2;line-height:1.6;">
+        Generate a key with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">openssl rand -hex 32</code>
+        and set it as an encrypted secret, then redeploy. See the deploy docs (README).
+      </div>
+    </div>
+  </div>`,
+    nonce,
+  );
+}
+
+function setupPage(nonce: string, error?: string): string {
   const errorHtml = error
     ? `<div style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
     : "";
@@ -712,6 +791,7 @@ function setupPage(error?: string): string {
       </div>
     </div>
   </div>`,
+    nonce,
   );
 }
 
@@ -738,7 +818,7 @@ dashboard.get("/setup", async (c) => {
   // If owner already exists, redirect to /login
   const owner = await getOwner(c.env.DB);
   if (owner) return c.redirect("/login");
-  return c.html(setupPage());
+  return c.html(setupPage(c.get("nonce")));
 });
 
 dashboard.post("/setup", async (c) => {
@@ -750,14 +830,15 @@ dashboard.post("/setup", async (c) => {
   const password = (form.get("password") as string | null) ?? "";
   const confirm = (form.get("confirm") as string | null) ?? "";
 
+  const nonce = c.get("nonce");
   if (!email || !password) {
-    return c.html(setupPage("Email and password are required."), 400);
+    return c.html(setupPage(nonce, "Email and password are required."), 400);
   }
   if (password.length < 8) {
-    return c.html(setupPage("Password must be at least 8 characters."), 400);
+    return c.html(setupPage(nonce, "Password must be at least 8 characters."), 400);
   }
   if (password !== confirm) {
-    return c.html(setupPage("Passwords do not match."), 400);
+    return c.html(setupPage(nonce, "Passwords do not match."), 400);
   }
 
   const pwHash = await hashPassword(password);
@@ -775,6 +856,18 @@ dashboard.post("/setup", async (c) => {
 // ---------------------------------------------------------------------------
 
 dashboard.get("/login", async (c) => {
+  // Fail closed: an unset AUTH_COOKIE_SECRET on a cold deploy would make the
+  // cookie check below throw (undefined/"" HMAC key) and surface a 500 instead
+  // of the login page. Guard before verifyCookie.
+  try {
+    requireSecrets(c.env, ["AUTH_COOKIE_SECRET"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      return c.html(notConfiguredPage(c.get("nonce"), err.missing), 500);
+    }
+    throw err;
+  }
+
   // Already authed?
   const cookies = parseCookies(c.req.header("cookie") ?? null);
   const cookieVal = cookies[COOKIE_NAME];
@@ -787,12 +880,25 @@ dashboard.get("/login", async (c) => {
   const owner = await getOwner(c.env.DB);
   if (!owner) return c.redirect("/setup");
 
-  return c.html(loginPage());
+  return c.html(loginPage(c.get("nonce")));
 });
 
 dashboard.post("/login", async (c) => {
   const owner = await getOwner(c.env.DB);
   if (!owner) return c.redirect("/setup");
+
+  const nonce = c.get("nonce");
+
+  // Fail closed: never sign a session cookie with an unset key (forgeable
+  // sessions). Surface a clear "not configured" page instead of a 500.
+  try {
+    requireSecrets(c.env, ["AUTH_COOKIE_SECRET"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      return c.html(notConfiguredPage(nonce, err.missing), 500);
+    }
+    throw err;
+  }
 
   const form = await c.req.formData();
   const email = (form.get("email") as string | null)?.trim() ?? "";
@@ -803,7 +909,7 @@ dashboard.post("/login", async (c) => {
     (await verifyPassword(password, owner.pw_hash));
 
   if (!valid) {
-    return c.html(loginPage("Invalid email or password."), 401);
+    return c.html(loginPage(nonce, "Invalid email or password."), 401);
   }
 
   const expiry = Date.now() + COOKIE_MAX_AGE * 1000;
@@ -829,12 +935,13 @@ dashboard.get("/logout", (c) => {
 // ---------------------------------------------------------------------------
 
 dashboard.get("/public/:token", async (c) => {
+  const nonce = c.get("nonce");
   const token = c.req.param("token");
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
   const site = await getSiteByPublicToken(c.env.DB, token);
-  if (!site) return c.html(htmlDoc("Not Found", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>"), 404);
+  if (!site) return c.html(htmlDoc("Not Found", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>", nonce), 404);
 
   const [cards, series, topPages, topSources, topCountries] = await Promise.all([
     getStatCards(c.env.DB, site.id, range),
@@ -846,7 +953,7 @@ dashboard.get("/public/:token", async (c) => {
 
   const content = `
     ${statCardsHtml(cards, cards.sampled)}
-    ${timeSeriesChartHtml(series, range.label, site.id, range.key)}
+    ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       ${breakdownCard("Top pages", topPages, "#4d86ff")}
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
@@ -866,7 +973,7 @@ dashboard.get("/public/:token", async (c) => {
     ${content}
   </div>`;
 
-  return c.html(htmlDoc(site.name, "", body));
+  return c.html(htmlDoc(site.name, "", body, nonce));
 });
 
 // ---------------------------------------------------------------------------
@@ -909,6 +1016,7 @@ dashboard.use("/app/*", requireAuth);
 
 // Overview
 dashboard.get("/app", async (c) => {
+  const nonce = c.get("nonce");
   const siteParam = c.req.query("site");
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
@@ -916,7 +1024,7 @@ dashboard.get("/app", async (c) => {
   const site = await resolveQuerySite(c.env.DB, siteParam);
   if (!site) {
     return c.html(
-      htmlDoc("No sites", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>"),
+      htmlDoc("No sites", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>", nonce),
     );
   }
 
@@ -933,13 +1041,13 @@ dashboard.get("/app", async (c) => {
 
   const content = `
     ${statCardsHtml(cards, cards.sampled)}
-    ${timeSeriesChartHtml(series, range.label, site.id, range.key)}
+    ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       ${breakdownCard("Top pages", topPages, "#4d86ff")}
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
     </div>
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
-    ${liveScript(site.id)}
+    ${liveScript(site.id, nonce)}
   `;
 
   return c.html(
@@ -947,12 +1055,14 @@ dashboard.get("/app", async (c) => {
       site.name,
       "",
       appLayout("overview", site.name, site.id, headerRight, content),
+      nonce,
     ),
   );
 });
 
 // Pages
 dashboard.get("/app/pages", async (c) => {
+  const nonce = c.get("nonce");
   const siteParam = c.req.query("site");
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
@@ -972,19 +1082,21 @@ dashboard.get("/app/pages", async (c) => {
       { label: "Pageviews", key: "pageviews" },
     ],
     rows,
-  ) + liveScript(site.id);
+  ) + liveScript(site.id, nonce);
 
   return c.html(
     htmlDoc(
       `Pages — ${site.name}`,
       "",
       appLayout("pages", site.name, site.id, headerRight, content),
+      nonce,
     ),
   );
 });
 
 // Sources
 dashboard.get("/app/sources", async (c) => {
+  const nonce = c.get("nonce");
   const siteParam = c.req.query("site");
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
@@ -1004,19 +1116,21 @@ dashboard.get("/app/sources", async (c) => {
       { label: "Share", key: "share" },
     ],
     rows,
-  ) + liveScript(site.id);
+  ) + liveScript(site.id, nonce);
 
   return c.html(
     htmlDoc(
       `Sources — ${site.name}`,
       "",
       appLayout("sources", site.name, site.id, headerRight, content),
+      nonce,
     ),
   );
 });
 
 // Geography
 dashboard.get("/app/geography", async (c) => {
+  const nonce = c.get("nonce");
   const siteParam = c.req.query("site");
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
@@ -1049,7 +1163,7 @@ dashboard.get("/app/geography", async (c) => {
   );
 
   const content = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/jsvectormap.min.css">
+    <link rel="stylesheet" href="/vendor/jsvectormap@1.6.0/jsvectormap.min.css">
     <div style="display:flex;gap:14px;align-items:stretch;">
       <div style="flex:1.7;min-width:0;background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
@@ -1065,7 +1179,7 @@ dashboard.get("/app/geography", async (c) => {
         <div style="display:flex;flex-direction:column;gap:14px;">${countryListHtml}</div>
       </div>
     </div>
-    <script>
+    <script nonce="${nonce}">
     (function(){
       var vals=${mapValues};
       function fmt(n){return n>=1000000?(n/1000000).toFixed(1).replace(/\\.0$/,'')+'M':n>=1000?(n/1000).toFixed(1).replace(/\\.0$/,'')+'K':String(n);}
@@ -1082,18 +1196,21 @@ dashboard.get("/app/geography", async (c) => {
           },
         });
       }
+      var NONCE=${JSON.stringify(nonce)};
       var s1=document.createElement('script');
-      s1.src='https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/jsvectormap.min.js';
+      s1.src='/vendor/jsvectormap@1.6.0/jsvectormap.min.js';
+      s1.nonce=NONCE;
       s1.onload=function(){
         var s2=document.createElement('script');
-        s2.src='https://cdn.jsdelivr.net/npm/jsvectormap@1.6.0/dist/maps/world.js';
+        s2.src='/vendor/jsvectormap@1.6.0/world.js';
+        s2.nonce=NONCE;
         s2.onload=loadMap;
         document.head.appendChild(s2);
       };
       document.head.appendChild(s1);
     })();
     </script>
-    ${liveScript(site.id)}
+    ${liveScript(site.id, nonce)}
   `;
 
   return c.html(
@@ -1101,6 +1218,7 @@ dashboard.get("/app/geography", async (c) => {
       `Geography — ${site.name}`,
       "",
       appLayout("geography", site.name, site.id, headerRight, content),
+      nonce,
     ),
   );
 });

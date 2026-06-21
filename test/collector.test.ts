@@ -228,6 +228,46 @@ describe("handleCollect — bot drop", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Collect — secret guard (fail-closed)
+// ---------------------------------------------------------------------------
+describe("handleCollect — secret guard", () => {
+  it("returns 503 when IDENTITY_HMAC_SECRET is unset", async () => {
+    const envWithoutSecret = { ...env, IDENTITY_HMAC_SECRET: "" } as typeof env;
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, envWithoutSecret, ctx);
+    expect(res.status).toBe(503);
+    const body = await res.text();
+    expect(body).toContain("collector not configured");
+  });
+
+  it("returns 503 when IDENTITY_HMAC_SECRET is explicitly undefined", async () => {
+    const envWithoutSecret = { ...env, IDENTITY_HMAC_SECRET: undefined } as unknown as typeof env;
+    const req = makeBeaconRequest(
+      { t: "pv", s: "open-site", p: "/" },
+      { ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, envWithoutSecret, ctx);
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 204 (happy path) when IDENTITY_HMAC_SECRET is set", async () => {
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(204);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Collect — WAE writeDataPoint blob/double mapping
 // ---------------------------------------------------------------------------
 describe("handleCollect — WAE slot mapping", () => {

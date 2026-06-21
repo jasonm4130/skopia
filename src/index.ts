@@ -9,6 +9,7 @@
 
 import { Hono } from "hono";
 import type { Env } from "./shared/types";
+import { securityHeaders, type AppEnv } from "./shared/security-headers";
 import { handleCollect, handlePreflight } from "./collector";
 import { handleScheduled } from "./rollup";
 import { dashboard } from "./dashboard";
@@ -19,7 +20,11 @@ import { STRATUS_JS } from "./shared/stratus-embed";
 // ["SiteLive"]) and the SITE_LIVE binding resolve against this entry point.
 export { SiteLive } from "./dashboard";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppEnv>();
+
+// Per-request CSP nonce + hardening headers on EVERY response (collector,
+// dashboard, marketing). Mounted before routes so all of them inherit it.
+app.use("*", securityHeaders);
 
 // Liveness probe (kept trivial so the walking-skeleton smoke test has a target).
 app.get("/health", (c) => c.text("ok"));

@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local dev; set as encrypted secrets in production (Deploy button prompts for these).
+AUTH_COOKIE_SECRET=    # session signing key — openssl rand -hex 32
+IDENTITY_HMAC_SECRET=  # cookieless visitor-hash key — openssl rand -hex 32
+CF_ACCOUNT_ID=         # Cloudflare account ID (Workers dashboard → Account ID)
+WAE_API_TOKEN=         # API token with "Account Analytics: Read" (for dashboard queries)

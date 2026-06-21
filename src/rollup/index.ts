@@ -9,6 +9,7 @@
 
 import type { Env, RollupDimension } from "../shared/types";
 import { utcDay, rotateDailySalt } from "../shared/identity";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
 
 // ---------------------------------------------------------------------------
 // WAE SQL HTTP API types
@@ -271,6 +272,20 @@ function detectSampled(rows: WaeSqlRow[]): boolean {
  * row's sampled flag reflects later-discovered sampling in per-dimension queries.
  */
 export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promise<void> {
+  // Fail closed: the WAE SQL API needs CF_ACCOUNT_ID + WAE_API_TOKEN. On a cold
+  // account these may be unset; without a guard queryWae fires a request to a
+  // malformed URL with `Bearer undefined` and surfaces an opaque HTTP error.
+  // Skip the pass with a clear diagnostic instead.
+  try {
+    requireSecrets(env, ["CF_ACCOUNT_ID", "WAE_API_TOKEN"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      console.error("rollup skipped — " + err.message);
+      return;
+    }
+    throw err;
+  }
+
   // 1. Rotate daily salt on every cron pass (idempotent, spec §3.5)
   await rotateDailySalt(env.SALT, new Date());
 

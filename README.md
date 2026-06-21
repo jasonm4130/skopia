@@ -3,8 +3,7 @@
 > Working name (provisional). Privacy-respecting, self-hostable web analytics that runs
 > entirely on the Cloudflare developer platform.
 
-**Status:** 🧪 Planning / design. No product code yet — see `docs/` for the research and
-specs being assembled.
+**Status:** 🚀 MVP shipped. Deploy to your own Cloudflare account with the button below.
 
 ## The idea
 
@@ -14,21 +13,97 @@ few minutes:
 - A tiny tracking script (target < 2 KB gzipped) — and optional cookieless, JS-free
   collection at the edge.
 - Ingestion, storage, and aggregation on Cloudflare primitives (Workers, Analytics Engine /
-  D1 / R2, Durable Objects).
-- A fast dashboard on Cloudflare Pages/Workers.
+  D1 / Durable Objects).
+- A fast dashboard served by the same single Worker.
 - No cookies, no consent banner needed, no data sold, no vendor lock-in beyond Cloudflare —
   and you own the Cloudflare account.
 
-## How this is being planned
+## Deploy
 
-Two specialist agents drive the design:
+### One-click deploy
 
-| Agent | Owns | Definition |
-|-------|------|-----------|
-| **Product Manager** | What we build & why — features, MVP, positioning | `.claude/agents/product-manager.md` |
-| **Cloudflare Tech Lead** | How we build it on Cloudflare — architecture, cost, ADRs | `.claude/agents/cloudflare-tech-lead.md` |
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jasonmatthew/analytics)
 
-Research → `docs/research/` · Specs → `docs/specs/` · Decisions → `docs/decisions/`
+The button clones this repo into your account and provisions the following automatically
+from `wrangler.jsonc`:
+
+| Resource | How it's provisioned |
+|----------|----------------------|
+| D1 database | Auto-provisioned by the button |
+| KV namespaces (cache + salt) | Auto-provisioned by the button |
+| Durable Object (SiteLive) | Provisioned via DO migration |
+| Workers Analytics Engine dataset | Created on first write — nothing to do |
+| Static assets (fonts + vendor JS) | Shipped with the Worker — nothing to provision |
+
+**The button will prompt you for four secrets** (declared in `package.json`
+`cloudflare.bindings`). Generate them before you click:
+
+### Generating your secrets
+
+**`AUTH_COOKIE_SECRET`** — signs the dashboard session cookie.
+
+```sh
+openssl rand -hex 32
+```
+
+Paste the output when the Deploy wizard prompts for it.
+
+**`IDENTITY_HMAC_SECRET`** — hashes visitor identities for cookieless analytics. No two
+sites' hashes are comparable even if hosted by the same operator.
+
+```sh
+openssl rand -hex 32
+```
+
+**`CF_ACCOUNT_ID`** — your Cloudflare account ID, needed for Analytics Engine queries.
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages**.
+2. Your Account ID appears in the right-hand sidebar.
+
+**`WAE_API_TOKEN`** — lets the dashboard query your Analytics Engine data. This is the one
+secret you cannot generate with `openssl` — it must be minted in the Cloudflare API-token
+UI:
+
+1. Go to **My Profile → API Tokens → Create Token**.
+2. Choose **Create Custom Token**.
+3. Under *Permissions*, add: **Account → Account Analytics → Read**.
+4. Under *Account Resources*, select your account.
+5. Click **Continue to summary → Create Token**.
+6. Copy the token — it is shown only once.
+
+### After deploy
+
+- **Dashboard shows data** once `WAE_API_TOKEN` is set — it's what powers the Analytics
+  Engine queries behind every chart.
+- **Ingest works** once `IDENTITY_HMAC_SECRET` is set — without it the collector returns
+  `503` rather than signing with an undefined key.
+- On first dashboard load, a setup screen prompts you to create your owner password. This
+  is the only manual step after the Deploy wizard.
+- Drop the tracking snippet on your site. **First pageview appears within minutes.**
+
+### Local development
+
+Copy `.dev.vars.example` to `.dev.vars` and fill in the four values, then:
+
+```sh
+npm install
+npm run dev
+```
+
+`wrangler dev` reads `.dev.vars` automatically. Do not commit `.dev.vars`.
+
+### CLI / advanced deploy
+
+```sh
+npm install
+npm run build
+wrangler deploy
+```
+
+`npm run build` regenerates the embedded files — `src/shared/schema-embed.ts`
+(cold-account D1 DDL) and `src/shared/stratus-embed.ts` (the minified tracking
+script) — so `wrangler deploy` never ships stale embedded content after a fresh
+clone or a migration change.
 
 ## Repository layout
 
@@ -38,6 +113,8 @@ design/           Frontend design system (Claude Design source — visual/behavi
 docs/research/    Deep-dive research (competitive analysis, Cloudflare architecture)
 docs/specs/       Approved design specs
 docs/decisions/   Architecture Decision Records (ADRs)
+public/           Static assets shipped with the Worker (fonts + vendored jsVectorMap)
+src/              Worker source (TypeScript strict)
 CLAUDE.md         Operating contract for agents/humans in this repo
 ```
 

@@ -10,6 +10,7 @@ import type { Beacon, Env, WaeEvent } from "../shared/types";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../shared/types";
 import { enrichFromCf, isBot, parseReferrerHost, parseUserAgent, parseUtm, bucketScreenWidth } from "../shared/cf";
 import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
 
 // ---------------------------------------------------------------------------
 // CORS helpers
@@ -169,7 +170,20 @@ export async function handleCollect(
     }
   }
 
-  // ---------- 8. Cookieless identity ----------
+  // ---------- 8. Secret guard (fail-closed before any crypto) ----------
+  try {
+    requireSecrets(env, ["IDENTITY_HMAC_SECRET"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      return new Response("collector not configured", {
+        status: 503,
+        headers: origin ? corsHeaders(origin) : {},
+      });
+    }
+    throw err;
+  }
+
+  // ---------- 9. Cookieless identity ----------
   const ip =
     request.headers.get("CF-Connecting-IP") ??
     request.headers.get("X-Forwarded-For") ??
@@ -178,7 +192,7 @@ export async function handleCollect(
   const salt = await getDailySalt(env.SALT, today);
   const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
 
-  // ---------- 9. Parse client-supplied fields ----------
+  // ---------- 10. Parse client-supplied fields ----------
   const referrerHost = parseReferrerHost(beacon.r);
   const utm = parseUtm(beacon.p);
 
@@ -194,7 +208,7 @@ export async function handleCollect(
     propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
   }
 
-  // ---------- 10. Build WAE event ----------
+  // ---------- 11. Build WAE event ----------
   const isPageview = beacon.t === "pv" ? 1 : 0;
   const waeEvent: WaeEvent = {
     siteId,
@@ -216,10 +230,10 @@ export async function handleCollect(
     screenWidth: beacon.w ?? 0,
   };
 
-  // ---------- 11. Write to WAE (synchronous) ----------
+  // ---------- 12. Write to WAE (synchronous) ----------
   env.WAE.writeDataPoint(toDataPoint(waeEvent));
 
-  // ---------- 12. Bump SiteLive DO (async, non-blocking) ----------
+  // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
   const doId = env.SITE_LIVE.idFromName(siteId);
   const doStub = env.SITE_LIVE.get(doId);
   ctx.waitUntil(
@@ -233,7 +247,7 @@ export async function handleCollect(
     }),
   );
 
-  // ---------- 13. Respond 204 ----------
+  // ---------- 14. Respond 204 ----------
   return new Response(null, {
     status: 204,
     headers: origin ? corsHeaders(origin) : {},

@@ -64,7 +64,18 @@
   //   AUTH_COOKIE_SECRET    — signed-session cookie key
   //   CF_ACCOUNT_ID         — account id for the WAE SQL HTTP API
   //   WAE_API_TOKEN         — bearer token (Account Analytics Read) for WAE SQL
-  "vars": { "RETENTION_DAYS": "90" }
+  "vars": { "RETENTION_DAYS": "90" },
+
+  // Static assets (vendored fonts + jsVectorMap) served from public/ on the same
+  // Worker (ADR-0005 "SSR + API + static assets"). No `binding`: the Worker never
+  // fetches assets; the asset layer answers only /fonts/* and /vendor/*. HTML
+  // stays 100% SSR — html_handling/not_found_handling are "none" so the asset
+  // layer never intercepts a route.
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "none",
+    "html_handling": "none"
+  }
 
   // OPT-IN, NOT MVP (spec §9.1) — archival/no-JS fan-out. Declared here as a
   // documented seam so the future archival agent has a home; left commented so
