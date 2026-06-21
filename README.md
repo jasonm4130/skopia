@@ -42,4 +42,6 @@ CLAUDE.md         Operating contract for agents/humans in this repo
 
 ## License
 
-TBD (an OSS-friendly license — MIT or Apache-2.0 — to be confirmed in the spec).
+**AGPL-3.0.** Chosen to keep every feature open and unlocked while preventing a closed-source
+SaaS fork — see `docs/specs/2026-06-21-product-spec.md` §6. (The `LICENSE` file is added in
+Phase 0 of the build plan.)

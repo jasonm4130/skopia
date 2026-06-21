@@ -148,15 +148,14 @@ KV cache + honesty badge (ADR-0003) · in-memory `SiteLive` DO for real-time (AD
 Hono SSR Worker + self-rolled signed-cookie auth (ADR-0005) · Deploy-to-Cloudflare button
 (ADR-0006) · real-time in MVP · funnels as marquee fast-follow · 90-day retention for MVP.
 
-**Open — need the human (these gate the start of implementation):**
+**Resolved by the human (2026-06-21):**
 
-1. **License** — PM recommends **AGPL-3.0** (keeps + protects the "no feature-gating" promise;
-   Plausible's precedent). Confirm, and decide **CLA: yes/no**.
-2. **Name** — **"Stratus" is provisional.** Confirm, or trigger a trademark/availability check
-   before brand goes into the dashboard/docs.
-3. **Wedge posture** — this plan ships a **thin, polished core in MVP with funnels as the v1.1
-   marquee**. Alternative: **pull funnels into MVP** as the launch headline (+~2 wk, larger
-   walking skeleton). Confirm the thin-core choice or override.
+1. **License → AGPL-3.0 ✅** (confirmed; keeps + protects the "no feature-gating" promise).
+   Add the `LICENSE` file in Phase 0. CLA decision deferred (not blocking).
+2. **Name → "Stratus" ✅** (kept as working name). Trademark/availability check is a
+   **pre-launch task** (Phase 5 readiness), not a blocker now.
+3. **Wedge posture → thin polished core, funnels as the v1.1 marquee ✅** (confirmed). MVP scope
+   in §2 stands; funnels remain the #1 fast-follow.
 
 **Technical risks to watch (not blockers):** WAE sampling at very-high single-site traffic
 (badge mitigates) · WAE billing not yet active (cost model is the priced projection) · WAE SQL
