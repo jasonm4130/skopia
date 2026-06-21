@@ -83,11 +83,12 @@ UI:
 
 ### Local development
 
-Copy `.dev.vars.example` to `.dev.vars` and fill in the four values, then:
+This project uses [pnpm](https://pnpm.io). Copy `.dev.vars.example` to `.dev.vars`
+and fill in the four values, then:
 
 ```sh
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 `wrangler dev` reads `.dev.vars` automatically. Do not commit `.dev.vars`.
@@ -95,12 +96,12 @@ npm run dev
 ### CLI / advanced deploy
 
 ```sh
-npm install
-npm run build
+pnpm install
+pnpm build
 wrangler deploy
 ```
 
-`npm run build` regenerates the embedded files — `src/shared/schema-embed.ts`
+`pnpm build` regenerates the embedded files — `src/shared/schema-embed.ts`
 (cold-account D1 DDL) and `src/shared/stratus-embed.ts` (the minified tracking
 script) — so `wrangler deploy` never ships stale embedded content after a fresh
 clone or a migration change.
