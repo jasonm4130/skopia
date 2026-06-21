@@ -1,7 +1,7 @@
 # Skopia
 
-> Working name (provisional). Privacy-respecting, self-hostable web analytics that runs
-> entirely on the Cloudflare developer platform.
+> Privacy-respecting, self-hostable web analytics that runs entirely on the Cloudflare
+> developer platform. *Skopia* — from the Greek *skopeín*, "to observe."
 
 **Status:** 🚀 MVP shipped. Deploy to your own Cloudflare account with the button below.
 
@@ -79,7 +79,8 @@ UI:
   `503` rather than signing with an undefined key.
 - On first dashboard load, a setup screen prompts you to create your owner password. This
   is the only manual step after the Deploy wizard.
-- Drop the tracking snippet on your site. **First pageview appears within minutes.**
+- Drop the tracking snippet on your site — see the [install guide](docs/install.md).
+  **First pageview appears within minutes.**
 
 ### Local development
 
@@ -105,6 +106,15 @@ wrangler deploy
 (cold-account D1 DDL) and `src/shared/skopia-embed.ts` (the minified tracking
 script) — so `wrangler deploy` never ships stale embedded content after a fresh
 clone or a migration change.
+
+## Documentation
+
+- [Install guide](docs/install.md) — add the tracking snippet, verify it, track
+  multiple sites, send custom events.
+- [Privacy & data collection](docs/privacy.md) — exactly what is and isn't collected.
+- [Contributing](CONTRIBUTING.md) — dev setup, conventions, the tracking-script budget.
+- [Security policy](SECURITY.md) — how to report a vulnerability; the security model.
+- [Architecture decisions](docs/decisions/) — the ADRs behind the design.
 
 ## Repository layout
 
