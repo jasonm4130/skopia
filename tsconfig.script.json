@@ -1,0 +1,20 @@
+{
+  // The browser tracking script ONLY. `dom` lib for browser globals
+  // (document, location, history, navigator, fetch); NO @cloudflare/workers-types
+  // (its global declarations clash with `dom`). esbuild bundles this to
+  // dist/stratus.js; here we just typecheck it.
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "es2020",
+    "moduleResolution": "bundler",
+    "lib": ["es2020", "dom", "dom.iterable"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src/script"]
+}

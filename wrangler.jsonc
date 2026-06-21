@@ -1,0 +1,74 @@
+{
+  // Stratus — single-Worker topology.
+  //
+  // TOPOLOGY DECISION (foundation): ONE Worker hosts everything — the collector
+  // HTTP route (`POST /e`), the SSR dashboard + marketing routes, and the
+  // `scheduled()` cron handler for the WAE -> D1 rollup + daily-salt rotation.
+  // The technical spec (§9.1) sketches the collector as "a second Worker (or a
+  // route) sharing the same bindings"; we take the route option deliberately:
+  // one deploy target = the simplest one-click "Deploy to Cloudflare" story
+  // (ADR-0006) and one set of bindings the feature agents never have to touch.
+  // If the collector ever needs to scale independently it can be split out
+  // later — the bindings below are already shared-by-design.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stratus",
+  "main": "src/index.ts",
+  // Compat date is past 2026-04-07 so `web_socket_auto_reply_to_close` is on by
+  // default (spec §6 — the live DO does not hand-handle WS close frames).
+  "compatibility_date": "2026-06-18",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": { "enabled": true },
+
+  // Raw event ingest. The dataset is created on first `writeDataPoint` — no
+  // pre-provisioning needed (spec §7.3). Index = site_id, 1 dp per event.
+  "analytics_engine_datasets": [{ "binding": "WAE", "dataset": "stratus_events" }],
+
+  // Relational metadata + exact daily rollups (written by cron, read by the
+  // dashboard). `database_id` is filled by `wrangler deploy` / the Deploy button.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stratus",
+      "database_id": "placeholder-set-on-deploy",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // CACHE = dashboard response cache (60-120 s TTL). SALT = rotating daily salt
+  // for the cookieless visitor hash (spec §4 / §5.3). Two namespaces, one store
+  // each. `id` is filled on deploy.
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "placeholder-set-on-deploy" },
+    { "binding": "SALT", "id": "placeholder-set-on-deploy" }
+  ],
+
+  // Per-site live visitor count. One `SiteLive` instance per site
+  // (`idFromName(site_id)`). In-memory state only (no SQLite storage cost in the
+  // live path, spec §6) — but declared as a SQLite-backed class per current
+  // Cloudflare guidance (SQLite storage is the default for all new DOs; it is
+  // free when unused and is the only forward-compatible migration path).
+  "durable_objects": {
+    "bindings": [{ "name": "SITE_LIVE", "class_name": "SiteLive" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SiteLive"] }],
+
+  // Cron: WAE -> D1 rollup every 5 minutes (finished days + current-day partial),
+  // which also rotates the daily salt at the first pass after UTC midnight
+  // (spec §3.5 / §5.1).
+  "triggers": { "crons": ["*/5 * * * *"] },
+
+  // Non-secret config. Secrets (NOT committed; set via `wrangler secret put` or
+  // Deploy-button prompts) are typed in src/shared/types.ts `Env`:
+  //   IDENTITY_HMAC_SECRET  — cookieless visitor hash key
+  //   AUTH_COOKIE_SECRET    — signed-session cookie key
+  //   CF_ACCOUNT_ID         — account id for the WAE SQL HTTP API
+  //   WAE_API_TOKEN         — bearer token (Account Analytics Read) for WAE SQL
+  "vars": { "RETENTION_DAYS": "90" }
+
+  // OPT-IN, NOT MVP (spec §9.1) — archival/no-JS fan-out. Declared here as a
+  // documented seam so the future archival agent has a home; left commented so
+  // the default deploy provisions nothing extra:
+  // "queues": { "producers": [{ "binding": "ARCHIVE_Q", "queue": "stratus-archive" }] },
+  // "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "stratus-archive" }]
+}
