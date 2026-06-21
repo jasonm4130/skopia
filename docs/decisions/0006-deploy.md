@@ -75,3 +75,12 @@ Nothing to provision; no CDN dependency at runtime.
 **Secrets prompt:** the Deploy button prompts for all four secrets (`AUTH_COOKIE_SECRET`,
 `IDENTITY_HMAC_SECRET`, `CF_ACCOUNT_ID`, `WAE_API_TOKEN`) as declared in `package.json`
 `cloudflare.bindings`. The README documents how to generate each one before clicking Deploy.
+
+## Addendum — 2026-06-21 (marketing split)
+
+ADR-0007 moves the marketing landing page out of the product Worker into a **separate repo +
+deploy target** (static Astro). This **does not change the deploy story above**: the product
+Worker keeps `wrangler.jsonc` at the repo root, so the Deploy button still points at the product
+repo root and provisions exactly as described. The product Worker stops serving `/` (a
+`GET / → /app` redirect replaces it). The marketing site is a maintainer-only deploy; forkers
+deploy only the product Worker. The one-click promise is preserved.
