@@ -1,5 +1,5 @@
 /**
- * Stratus — root Worker entry (single-Worker topology).
+ * Skopia — root Worker entry (single-Worker topology).
  *
  * One Worker hosts the collector route, the dashboard + marketing SSR, and the
  * cron `scheduled()` rollup. Bindings are shared (wrangler.jsonc). Feature agents
@@ -8,18 +8,23 @@
  */
 
 import { Hono } from "hono";
-import type { Env } from "./shared/types";
 import { handleCollect, handlePreflight } from "./collector";
-import { handleScheduled } from "./rollup";
 import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
-import { STRATUS_JS } from "./shared/stratus-embed";
+import { handleScheduled } from "./rollup";
+import { type AppEnv, securityHeaders } from "./shared/security-headers";
+import { SKOPIA_JS } from "./shared/skopia-embed";
+import type { Env } from "./shared/types";
 
 // Re-export the Durable Object class so the wrangler migration (new_sqlite_classes:
 // ["SiteLive"]) and the SITE_LIVE binding resolve against this entry point.
 export { SiteLive } from "./dashboard";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppEnv>();
+
+// Per-request CSP nonce + hardening headers on EVERY response (collector,
+// dashboard, marketing). Mounted before routes so all of them inherit it.
+app.use("*", securityHeaders);
 
 // Liveness probe (kept trivial so the walking-skeleton smoke test has a target).
 app.get("/health", (c) => c.text("ok"));
@@ -28,16 +33,14 @@ app.get("/health", (c) => c.text("ok"));
 // ExecutionContext; at runtime it IS the Workers one, so we widen at this seam
 // to keep the shared handler signatures on the canonical workers-types type.
 app.options("/e", (c) => handlePreflight(c.req.raw, c.env));
-app.post("/e", (c) =>
-  handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext),
-);
+app.post("/e", (c) => handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext));
 
-// Serve the built, minified tracking script. STRATUS_JS is generated at build
+// Serve the built, minified tracking script. SKOPIA_JS is generated at build
 // time by `npm run build:script` (esbuild → scripts/build-embed.mjs) and
 // embedded as a string constant so the Worker has zero FS/asset deps at runtime.
 // The served bytes equal what scripts/check-script-size.mjs measures.
-app.get("/stratus.js", (c) =>
-  c.text(STRATUS_JS, 200, {
+app.get("/skopia.js", (c) =>
+  c.text(SKOPIA_JS, 200, {
     "Content-Type": "application/javascript; charset=utf-8",
     "Cache-Control": "public, max-age=3600",
   }),

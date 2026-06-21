@@ -1,5 +1,5 @@
 /**
- * Stratus — dashboard SSR + auth tests.
+ * Skopia — dashboard SSR + auth tests.
  *
  * Tests:
  *   - /setup GET renders the first-run form
@@ -19,19 +19,19 @@
  * agent's implementation.
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mock src/db/queries.ts before importing the worker
 // ---------------------------------------------------------------------------
 
 import type {
+  BreakdownRow,
   SiteRow,
-  UserRow,
   StatCards,
   TimeSeriesPoint,
-  BreakdownRow,
+  UserRow,
 } from "../../src/shared/types";
 
 const MOCK_SITE: SiteRow = {
@@ -100,7 +100,7 @@ import worker from "../../src/index";
 // ---------------------------------------------------------------------------
 
 function req(path: string, opts?: RequestInit): Request {
-  return new Request(`https://stratus.test${path}`, opts);
+  return new Request(`https://skopia.test${path}`, opts);
 }
 
 async function fetch_(request: Request): Promise<{ res: Response; text: string }> {
@@ -144,7 +144,7 @@ describe("/setup", () => {
     expect(res.status).toBe(200);
     const ct = res.headers.get("content-type") ?? "";
     expect(ct).toMatch(/text\/html/);
-    expect(text).toContain("Welcome to Stratus");
+    expect(text).toContain("Welcome to Skopia");
     expect(text).toContain('action="/setup"');
   });
 });
@@ -206,7 +206,7 @@ describe("/logout", () => {
     expect(res.headers.get("location")).toBe("/login");
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain("Max-Age=0");
-    expect(setCookie).toContain("stratus_session");
+    expect(setCookie).toContain("skopia_session");
   });
 });
 
@@ -241,7 +241,7 @@ describe("auth gating", () => {
 
   it("GET /app with invalid cookie redirects to /login", async () => {
     const { res } = await fetch_(
-      req("/app", { headers: { Cookie: "stratus_session=bogus.invalidsig" } }),
+      req("/app", { headers: { Cookie: "skopia_session=bogus.invalidsig" } }),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/login");
@@ -306,6 +306,60 @@ describe("/public/:token", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stat-card labels (Task 5 — honest "bounce rate" relabel)
+// ---------------------------------------------------------------------------
+
+describe("stat-card labels", () => {
+  it("renders the 'Single-Page Visits' label, not 'Bounce Rate'", async () => {
+    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
+    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    expect(text).toContain("Single-Page Visits");
+    expect(text).not.toContain("Bounce Rate");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CSP nonce on inline scripts (Task 4)
+// ---------------------------------------------------------------------------
+
+/** Sign a valid session cookie using the test env's AUTH_COOKIE_SECRET. */
+async function authedCookie(): Promise<string> {
+  const secret = (env as { AUTH_COOKIE_SECRET?: string }).AUTH_COOKIE_SECRET ?? "test-secret";
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const payload = `1|${expiry}`;
+  const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payload));
+  const sigHex = Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return encodeURIComponent(`${payload}.${sigHex}`);
+}
+
+describe("CSP nonce", () => {
+  it("authed /app inline <script> carries a nonce= attribute", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    // Every inline <script> (no src) must be nonced for strict-dynamic CSP.
+    expect(text).toMatch(/<script nonce="[a-f0-9]+">/);
+    // No un-nonced inline script blocks.
+    expect(text).not.toMatch(/<script>\s*\n/);
+    // The CSP header from the root middleware advertises the same nonce.
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sampled badge
 // ---------------------------------------------------------------------------
 
@@ -365,7 +419,7 @@ describe("/live", () => {
 
     const { res } = await fetch_(
       req("/live?site=site-001", {
-        headers: { Cookie: `stratus_session=${cookieVal}` },
+        headers: { Cookie: `skopia_session=${cookieVal}` },
       }),
     );
     expect(res.status).toBe(426);

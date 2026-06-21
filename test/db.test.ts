@@ -6,20 +6,20 @@
  */
 
 import { env } from "cloudflare:test";
-import { describe, it, expect, beforeAll } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
-  listSites,
+  getBreakdown,
+  getOverview,
+  getOwner,
+  getRealtimeCount,
   getSite,
   getSiteByPublicToken,
-  getOwner,
-  listGoals,
   getStatCards,
   getTimeSeries,
-  getBreakdown,
-  getTopPages,
   getTopCountries,
-  getOverview,
-  getRealtimeCount,
+  getTopPages,
+  listGoals,
+  listSites,
 } from "../src/db/queries";
 import { applyMigrations } from "./apply-migrations";
 
@@ -36,9 +36,7 @@ beforeAll(async () => {
     .run();
 
   // Seed a user
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO users (email, pw_hash, role) VALUES (?, ?, ?)",
-  )
+  await env.DB.prepare("INSERT OR IGNORE INTO users (email, pw_hash, role) VALUES (?, ?, ?)")
     .bind("owner@example.com", "hashed-pw", "owner")
     .run();
 
@@ -222,14 +220,24 @@ describe("getBreakdown / getTopPages", () => {
   });
 
   it("returns empty array for site with no data", async () => {
-    const pages = await getTopPages(env.DB, "default", { from: "2026-06-19", to: "2026-06-21" }, 10);
+    const pages = await getTopPages(
+      env.DB,
+      "default",
+      { from: "2026-06-19", to: "2026-06-21" },
+      10,
+    );
     expect(pages).toHaveLength(0);
   });
 });
 
 describe("getTopCountries", () => {
   it("returns country breakdown", async () => {
-    const countries = await getTopCountries(env.DB, "site-a", { from: "2026-06-19", to: "2026-06-20" }, 10);
+    const countries = await getTopCountries(
+      env.DB,
+      "site-a",
+      { from: "2026-06-19", to: "2026-06-20" },
+      10,
+    );
     const labels = countries.map((c) => c.label);
     expect(labels).toContain("US");
     expect(labels).toContain("DE");
@@ -238,7 +246,13 @@ describe("getTopCountries", () => {
 
 describe("getBreakdown generic", () => {
   it("works for the 'country' dimension", async () => {
-    const rows = await getBreakdown(env.DB, "site-a", { from: "2026-06-19", to: "2026-06-19" }, "country", 10);
+    const rows = await getBreakdown(
+      env.DB,
+      "site-a",
+      { from: "2026-06-19", to: "2026-06-19" },
+      "country",
+      10,
+    );
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]?.label).toBeTruthy();
   });

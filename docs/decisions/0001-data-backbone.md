@@ -6,7 +6,7 @@
 
 ## Context
 
-Stratus must ingest high-cardinality web-analytics events (pageviews + custom events) at the
+Skopia must ingest high-cardinality web-analytics events (pageviews + custom events) at the
 edge, store them cheaply with no database server to operate, and serve a snappy multi-site
 dashboard — on a self-host deploy that should cost $0 on the free tier and ~$5/mo at mid-traffic
 (product spec §1, §4). No single Cloudflare primitive does all of this. We must choose a

@@ -3,7 +3,7 @@
 // test files rely on this ambient reference.
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import type { Env as StratusEnv } from "../src/shared/types";
+import type { Env as SkopiaEnv } from "../src/shared/types";
 
 // `cloudflare:test` types the exported `env` as `Cloudflare.Env` (the global
 // wrangler normally generates into worker-configuration.d.ts). That generated
@@ -14,7 +14,7 @@ import type { Env as StratusEnv } from "../src/shared/types";
 // override in vitest.config.ts.
 declare global {
   namespace Cloudflare {
-    interface Env extends StratusEnv {
+    interface Env extends SkopiaEnv {
       /** Serialized D1 migrations injected by vitest.config.ts (test-only). */
       TEST_MIGRATIONS: string;
     }

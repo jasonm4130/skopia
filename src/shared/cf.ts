@@ -1,5 +1,5 @@
 /**
- * Stratus — server-side enrichment helpers (foundation-owned signatures, FINAL).
+ * Skopia — server-side enrichment helpers (foundation-owned signatures, FINAL).
  *
  * Everything the dashboard shows beyond what the browser sends (country, ASN,
  * device/browser/OS, bot class) is derived here from `request.cf` and the
@@ -48,12 +48,12 @@ export function enrichFromCf(request: Request): CfEnrichment {
   // Cloudflare's `cf` object is attached to every incoming request; cast it.
   const cf = (request as Request & { cf?: Record<string, unknown> }).cf ?? {};
   return {
-    country: typeof cf["country"] === "string" && cf["country"] ? cf["country"] : "XX",
-    colo: typeof cf["colo"] === "string" ? cf["colo"] : "",
-    asn: typeof cf["asn"] === "number" ? cf["asn"] : 0,
-    asOrganization: typeof cf["asOrganization"] === "string" ? cf["asOrganization"] : "",
-    httpProtocol: typeof cf["httpProtocol"] === "string" ? cf["httpProtocol"] : "",
-    isEUCountry: cf["isEUCountry"] === "1",
+    country: typeof cf.country === "string" && cf.country ? cf.country : "XX",
+    colo: typeof cf.colo === "string" ? cf.colo : "",
+    asn: typeof cf.asn === "number" ? cf.asn : 0,
+    asOrganization: typeof cf.asOrganization === "string" ? cf.asOrganization : "",
+    httpProtocol: typeof cf.httpProtocol === "string" ? cf.httpProtocol : "",
+    isEUCountry: cf.isEUCountry === "1",
   };
 }
 
@@ -197,7 +197,7 @@ const DATACENTER_ORG_PATTERNS = [
 export function isBot(request: Request, ua: string, cf: CfEnrichment): boolean {
   // 1. `cf.verifiedBot` — Super Bot Fight Mode surfaces this
   const cfRaw = (request as Request & { cf?: Record<string, unknown> }).cf ?? {};
-  if (cfRaw["verifiedBot"] === true) return true;
+  if (cfRaw.verifiedBot === true) return true;
 
   // 2. Empty UA
   if (!ua || ua.trim() === "") return true;

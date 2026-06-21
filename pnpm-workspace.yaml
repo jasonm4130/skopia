@@ -1,0 +1,5 @@
+# pnpm 11 reads build-script approval from here (not package.json).
+allowBuilds:
+  esbuild: true   # bundles/minifies the tracking script (build:script)
+  workerd: true   # Cloudflare Workers runtime for the vitest pool
+  sharp: false    # transitive dep we don't use at runtime

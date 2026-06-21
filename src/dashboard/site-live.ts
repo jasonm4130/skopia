@@ -1,5 +1,5 @@
 /**
- * Stratus — SiteLive Durable Object (per-site live visitor count, spec §6).
+ * Skopia — SiteLive Durable Object (per-site live visitor count, spec §6).
  *
  * One instance per site (`idFromName(site_id)`). Keeps an in-memory
  * `vid -> lastSeen` map, evicts entries older than 5 minutes (driven by a DO
@@ -9,7 +9,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { Env, BreakdownRow, LiveSnapshot } from "../shared/types";
+import type { BreakdownRow, Env, LiveSnapshot } from "../shared/types";
 
 /** TTL for a visitor in the live map: 5 minutes in ms. */
 const VISITOR_TTL_MS = 5 * 60 * 1000;
@@ -67,7 +67,7 @@ export class SiteLive extends DurableObject<Env> {
 
   private handleLiveWs(request: Request): Response {
     const upgradeHeader = request.headers.get("Upgrade");
-    if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
+    if (upgradeHeader?.toLowerCase() !== "websocket") {
       return new Response("Expected WebSocket upgrade", { status: 426 });
     }
 
@@ -86,10 +86,7 @@ export class SiteLive extends DurableObject<Env> {
   }
 
   /** Hibernation-API message handler — clients can send "ping" for a refresh. */
-  override async webSocketMessage(
-    ws: WebSocket,
-    message: string | ArrayBuffer,
-  ): Promise<void> {
+  override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const text = typeof message === "string" ? message : new TextDecoder().decode(message);
     if (text === "ping") {
       ws.send(JSON.stringify(this.currentSnapshot()));
@@ -103,7 +100,9 @@ export class SiteLive extends DurableObject<Env> {
     reason: string,
     wasClean: boolean,
   ): Promise<void> {
-    void code, void reason, void wasClean;
+    void code;
+    void reason;
+    void wasClean;
     try {
       ws.close();
     } catch {

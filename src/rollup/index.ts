@@ -1,5 +1,5 @@
 /**
- * Stratus — rollup cron (WAE -> D1 exact aggregates).
+ * Skopia — rollup cron (WAE -> D1 exact aggregates).
  *
  * Runs on the cron trigger (spec §5.1): query WAE with sampling-correct SQL,
  * GROUP BY each dimension, upsert exact aggregates into `rollup_daily`, set the
@@ -7,8 +7,9 @@
  * pass after UTC midnight.
  */
 
+import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { rotateDailySalt, utcDay } from "../shared/identity";
 import type { Env, RollupDimension } from "../shared/types";
-import { utcDay, rotateDailySalt } from "../shared/identity";
 
 // ---------------------------------------------------------------------------
 // WAE SQL HTTP API types
@@ -103,11 +104,7 @@ function nextUtcDay(day: string): string {
 const WAE_SQL_ENDPOINT = (accountId: string) =>
   `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`;
 
-async function queryWae(
-  sql: string,
-  env: Env,
-  fetcher: typeof fetch,
-): Promise<WaeSqlResponse> {
+async function queryWae(sql: string, env: Env, fetcher: typeof fetch): Promise<WaeSqlResponse> {
   // WAE SQL API: POST the raw SQL as the body (plain text), not JSON.
   // See: developers.cloudflare.com/analytics/analytics-engine/sql-api/
   const res = await fetcher(WAE_SQL_ENDPOINT(env.CF_ACCOUNT_ID), {
@@ -257,7 +254,7 @@ function buildVisitorsSql(
 function detectSampled(rows: WaeSqlRow[]): boolean {
   for (const row of rows) {
     const avgInterval = Number(row.avg_interval);
-    if (!isNaN(avgInterval) && avgInterval > 1.0) return true;
+    if (!Number.isNaN(avgInterval) && avgInterval > 1.0) return true;
   }
   return false;
 }
@@ -271,6 +268,20 @@ function detectSampled(rows: WaeSqlRow[]): boolean {
  * row's sampled flag reflects later-discovered sampling in per-dimension queries.
  */
 export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promise<void> {
+  // Fail closed: the WAE SQL API needs CF_ACCOUNT_ID + WAE_API_TOKEN. On a cold
+  // account these may be unset; without a guard queryWae fires a request to a
+  // malformed URL with `Bearer undefined` and surfaces an opaque HTTP error.
+  // Skip the pass with a clear diagnostic instead.
+  try {
+    requireSecrets(env, ["CF_ACCOUNT_ID", "WAE_API_TOKEN"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      console.error(`rollup skipped — ${err.message}`);
+      return;
+    }
+    throw err;
+  }
+
   // 1. Rotate daily salt on every cron pass (idempotent, spec §3.5)
   await rotateDailySalt(env.SALT, new Date());
 
@@ -290,7 +301,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
   }
 
   // WAE dataset name must match the `dataset` field in wrangler.jsonc
-  const dataset = "stratus_events";
+  const dataset = "skopia_events";
 
   // 3. For each site × dimension × day, query WAE and upsert into D1
   const upsertStmt = env.DB.prepare(`

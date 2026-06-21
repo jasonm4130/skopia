@@ -1,4 +1,4 @@
-# Stratus — End-to-End Product Plan
+# Skopia — End-to-End Product Plan
 
 - **Date:** 2026-06-21
 - **Status:** Draft for human approval. This is the master plan that reconciles the product and
@@ -17,7 +17,7 @@
 
 ## 1. The product in one page
 
-**What:** Stratus — open-source, privacy-first web analytics you deploy to your **own Cloudflare
+**What:** Skopia — open-source, privacy-first web analytics you deploy to your **own Cloudflare
 account in ~60 seconds**. No server, no database to run, a sub-2 KB script, every feature
 unlocked.
 
@@ -152,7 +152,7 @@ Hono SSR Worker + self-rolled signed-cookie auth (ADR-0005) · Deploy-to-Cloudfl
 
 1. **License → AGPL-3.0 ✅** (confirmed; keeps + protects the "no feature-gating" promise).
    Add the `LICENSE` file in Phase 0. CLA decision deferred (not blocking).
-2. **Name → "Stratus" ✅** (kept as working name). Trademark/availability check is a
+2. **Name → "Skopia" ✅** (kept as working name). Trademark/availability check is a
    **pre-launch task** (Phase 5 readiness), not a blocker now.
 3. **Wedge posture → thin polished core, funnels as the v1.1 marquee ✅** (confirmed). MVP scope
    in §2 stands; funnels remain the #1 fast-follow.

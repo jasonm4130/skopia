@@ -1,4 +1,4 @@
-# Stratus — Technical Spec (MVP architecture)
+# Skopia — Technical Spec (MVP architecture)
 
 - **Date:** 2026-06-21
 - **Author:** `cloudflare-tech-lead` agent
@@ -14,7 +14,7 @@
 
 ## 0. Design stance (the one-paragraph version)
 
-Stratus is **five Cloudflare primitives wired by two Workers and one Cron**. The collector
+Skopia is **five Cloudflare primitives wired by two Workers and one Cron**. The collector
 Worker writes raw events directly to **Workers Analytics Engine (WAE)** and bumps a per-site
 **Durable Object** for the live count. A **Cron Worker** rolls WAE up into exact daily/period
 aggregates in **D1**, and the dashboard Worker serves SSR pages reading **D1 + KV cache**,
@@ -30,7 +30,7 @@ or the $5/mo Workers Paid base**.
 ```
                               BROWSER (visitor)
   ┌──────────────────────────────────────────────────────────────────────┐
-  │  stratus.js  (<2 KB gz)                                                │
+  │  skopia.js  (<2 KB gz)                                                │
   │   • pageview on load + history.pushState/replaceState + popstate (SPA) │
   │   • track(name, props)  custom events                                  │
   │   • collects: referrer, pathname, title, screen.width, UTM from URL    │
@@ -110,7 +110,7 @@ goals, and can read a response (used to receive the `site_id`-scoped config if n
 **SPA route changes:** monkey-patch `history.pushState`/`replaceState` (neither emits an event)
 and listen to `popstate`; emit a pageview on each transition, debounced one frame.
 
-**Custom events:** global `stratus('event', name, props)` (or `window.stratus.track`). A custom
+**Custom events:** global `skopia('event', name, props)` (or `window.skopia.track`). A custom
 event is *a pageview with a `name` and optional `props`* — same beacon, same schema (§4). This is
 the deliberate "generic event from day one" design the PM's MVP custom-events inclusion depends
 on, and it is what makes **funnels a fast-follow with no schema rework** (funnels are sequences
@@ -135,7 +135,7 @@ A single Worker on a route like `collect.<deploy-domain>` (or the user's own dom
 3. **Heuristic bot drop** (free-tier only — **no** Enterprise Bot Management dependency, per the
    spec's "not the moat"): UA blocklist (GPTBot/CCBot/AhrefsBot/etc.), datacenter-ASN /
    `cf.asOrganization` heuristics, `cf.verifiedBot` where Super Bot Fight Mode surfaces it, and
-   missing-header heuristics. Documented "put Stratus behind Cloudflare WAF" recipe covers the
+   missing-header heuristics. Documented "put Skopia behind Cloudflare WAF" recipe covers the
    rest. ⚠️ granular `cf.botManagement.score` is Enterprise-only — **not used**.
 4. **Enrich** from `request.cf`: `country`, `colo`, `asn`, `asOrganization`, `httpProtocol`,
    `isEUCountry`. Parse `User-Agent` → device class / browser / OS (small server-side table).
@@ -411,7 +411,7 @@ plan.
 
 ```jsonc
 {
-  "name": "stratus",
+  "name": "skopia",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-18",
   "compatibility_flags": ["nodejs_compat"],
@@ -420,12 +420,12 @@ plan.
 
   // Raw event ingest — created on first write, no pre-provisioning needed.
   "analytics_engine_datasets": [
-    { "binding": "WAE", "dataset": "stratus_events" }
+    { "binding": "WAE", "dataset": "skopia_events" }
   ],
 
   // Metadata + exact rollups (auto-provisioned by deploy button).
   "d1_databases": [
-    { "binding": "DB", "database_name": "stratus", "database_id": "<auto>" }
+    { "binding": "DB", "database_name": "skopia", "database_id": "<auto>" }
   ],
 
   // Dashboard cache + rotating daily salt (auto-provisioned).
@@ -452,8 +452,8 @@ plan.
   "vars": { "RETENTION_DAYS": "90" }
 
   // OPT-IN, NOT MVP (documented, commented out in the shipped file):
-  // "queues": { "producers": [{ "binding": "ARCHIVE_Q", "queue": "stratus-archive" }] },
-  // "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "stratus-archive" }]
+  // "queues": { "producers": [{ "binding": "ARCHIVE_Q", "queue": "skopia-archive" }] },
+  // "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "skopia-archive" }]
 }
 ```
 
@@ -534,7 +534,7 @@ verify middleware over Web Crypto HMAC).
    note it if the human prefers Access: re-verify seat allowance before recommending it.
 5. **Pipelines/R2-SQL betas** (only matters when R2 archival ships) — beta limits + pricing partly
    single-source ⚠️; re-verify before building #21.
-6. **Human decisions (not ours):** license (AGPL-3.0, PM-recommended), name ("Stratus" provisional —
+6. **Human decisions (not ours):** license (AGPL-3.0, PM-recommended), name ("Skopia" provisional —
    trademark check), and the wedge posture (thin-polished-core MVP vs funnels-in-MVP — this spec is
    scoped to the thin-core choice; pulling funnels in adds ~2 wk).
 

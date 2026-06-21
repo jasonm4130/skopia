@@ -1,8 +1,8 @@
 /**
- * Stratus — marketing page tests.
+ * Skopia — marketing page tests.
  *
  * Verifies GET "/" returns a well-formed landing page matching the design
- * spec (design/Stratus Marketing.dc.html):
+ * spec (design/Skopia Marketing.dc.html):
  *   - correct status + content-type
  *   - hero headline present
  *   - AGPL-3.0 license copy (not "MIT licensed")
@@ -15,17 +15,13 @@
  *   - escHtml escapes single quotes
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
 import worker from "../../src/index";
 
 async function fetchRoot(): Promise<{ res: Response; text: string }> {
   const ctx = createExecutionContext();
-  const res = await worker.fetch(
-    new Request("https://stratus.test/"),
-    env,
-    ctx,
-  );
+  const res = await worker.fetch(new Request("https://skopia.test/"), env, ctx);
   await waitOnExecutionContext(ctx);
   const text = await res.text();
   return { res, text };
@@ -56,7 +52,7 @@ describe("marketing landing page", () => {
 
   it("contains the pricing section headline", async () => {
     const { text } = await fetchRoot();
-    expect(text).toContain("Stratus is free. You just pay Cloudflare.");
+    expect(text).toContain("Skopia is free. You just pay Cloudflare.");
   });
 
   it("contains the FAQ section with 'Questions, answered'", async () => {
@@ -196,5 +192,51 @@ describe("marketing landing page", () => {
     // The escHtml function must include the single-quote replacement;
     // this is verified by checking the script contains the &#39; replacement call.
     expect(text).toContain("&#39;");
+  });
+
+  // Task 5: honest label — "Single-Page Visits" replaces "Bounce"
+  it("demo stat card shows 'Single-Page Visits' not 'Bounce'", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toContain("Single-Page Visits");
+    // Guard against false-positive: the standalone word "Bounce" (as a card label)
+    // must not appear. We check for the exact label text wrapped in the card markup.
+    // The old label was ">Bounce<" in the card's label div.
+    expect(text).not.toMatch(/>Bounce</);
+  });
+
+  // Task 3 + 4: no Google Fonts external refs; self-hosted @font-face present
+  it("does not contain Google Fonts links or preconnects", async () => {
+    const { text } = await fetchRoot();
+    expect(text).not.toContain("fonts.googleapis.com");
+    expect(text).not.toContain("fonts.gstatic.com");
+  });
+
+  it("contains self-hosted @font-face rules pointing at /fonts/", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toContain("@font-face");
+    expect(text).toContain("/fonts/space-grotesk-");
+    expect(text).toContain("/fonts/hanken-grotesk-");
+    expect(text).toContain("/fonts/jetbrains-mono-");
+    expect(text).toContain("font-display:swap");
+  });
+
+  // Task 4: CSP nonce on inline blocks
+  it("inline <style> block carries a nonce attribute", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toMatch(/<style nonce="[0-9a-f]+">/);
+  });
+
+  it("inline <script> block carries a nonce attribute", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toMatch(/<script nonce="[0-9a-f]+">/);
+  });
+
+  it("style and script blocks share the same nonce value", async () => {
+    const { text } = await fetchRoot();
+    const styleMatch = text.match(/<style nonce="([0-9a-f]+)">/);
+    const scriptMatch = text.match(/<script nonce="([0-9a-f]+)">/);
+    expect(styleMatch).not.toBeNull();
+    expect(scriptMatch).not.toBeNull();
+    expect(styleMatch?.[1]).toBe(scriptMatch?.[1]);
   });
 });

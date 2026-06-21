@@ -1,4 +1,4 @@
-# Stratus — Design System
+# Skopia — Design System
 
 The frontend's visual + behavioral source of truth, imported from the Claude Design project
 **"OSS Analytics on Cloudflare"** (`5ae45fa2-6048-42bb-891b-08663484a731`) on 2026-06-21.
@@ -10,10 +10,10 @@ These are the canvas we build the real frontend *to match* — not the productio
 
 | File | What it is | Interactive? |
 |------|-----------|--------------|
-| `Stratus Marketing.dc.html` | Public landing page — nav, hero (terminal mock), trust strip, how-it-works, product shot, features bento, comparison table, pricing + **live cost calculator**, FAQ accordion, CTA, footer. The canonical marketing direction. | ✅ calculator slider + FAQ accordion |
-| `Stratus Dashboard.dc.html` | The product dashboard — sidebar nav, Overview (stat cards, time-series chart, top pages/sources), Geography (jsVectorMap world map + top countries), Pages/Sources tables. The canonical app direction. | ✅ range picker, metric toggle, chart hover, view switching, geo map |
-| `Stratus Dark.dc.html` | Static "board" showing the landing + dashboard side by side on a neutral backdrop. A presentation artifact, not a page to build. | — static |
-| `Stratus Exploration.dc.html` | Early design rationale + light-theme variants that preceded the dark direction. Kept for design history. | — static |
+| `Skopia Marketing.dc.html` | Public landing page — nav, hero (terminal mock), trust strip, how-it-works, product shot, features bento, comparison table, pricing + **live cost calculator**, FAQ accordion, CTA, footer. The canonical marketing direction. | ✅ calculator slider + FAQ accordion |
+| `Skopia Dashboard.dc.html` | The product dashboard — sidebar nav, Overview (stat cards, time-series chart, top pages/sources), Geography (jsVectorMap world map + top countries), Pages/Sources tables. The canonical app direction. | ✅ range picker, metric toggle, chart hover, view switching, geo map |
+| `Skopia Dark.dc.html` | Static "board" showing the landing + dashboard side by side on a neutral backdrop. A presentation artifact, not a page to build. | — static |
+| `Skopia Exploration.dc.html` | Early design rationale + light-theme variants that preceded the dark direction. Kept for design history. | — static |
 | `support.js` | The Claude Design ("DC") runtime that renders the `.dc.html` files. Generated, vendored — do not edit. | — |
 
 > Not imported: `screenshots/geo.png` (a static screenshot in the source project, not referenced by
@@ -53,9 +53,9 @@ Build mapping:
 
 | Design file | Builds into | Build phase |
 |-------------|-------------|-------------|
-| `Stratus Dashboard.dc.html` | Hono SSR dashboard Worker — its `DCLogic` (range picker, metric toggle, chart hover, geo map) is the behavioral spec for Phases 1–4 | Phases 1–4 |
-| `Stratus Marketing.dc.html` | Public marketing/landing page (static or Pages); cost calculator + FAQ logic are spec'd in its `DCLogic` | Phase 5 / launch |
-| `Stratus Dark.dc.html`, `Stratus Exploration.dc.html` | Reference only | — |
+| `Skopia Dashboard.dc.html` | Hono SSR dashboard Worker — its `DCLogic` (range picker, metric toggle, chart hover, geo map) is the behavioral spec for Phases 1–4 | Phases 1–4 |
+| `Skopia Marketing.dc.html` | Public marketing/landing page (static or Pages); cost calculator + FAQ logic are spec'd in its `DCLogic` | Phase 5 / launch |
+| `Skopia Dark.dc.html`, `Skopia Exploration.dc.html` | Reference only | — |
 
 **To preview the originals:** open the Claude Design project. To render locally you would need to load
 React + ReactDOM as globals before `support.js` (the files don't include them).

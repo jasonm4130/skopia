@@ -1,4 +1,4 @@
-# Stratus — Product Spec
+# Skopia — Product Spec
 
 - **Date:** 2026-06-21
 - **Author:** `product-manager` agent
@@ -64,7 +64,7 @@ Four personas, ranked by how central they are to the wedge. Reach estimates feed
 - **JTBD:** *"When I ship a project, I want to know if anyone's using it and where they came
   from, without paying a monthly SaaS fee, running a database, or bolting a cookie banner onto
   my landing page."*
-- **Why Stratus wins:** One-click deploy to an account he already has; $0 on free tier;
+- **Why Skopia wins:** One-click deploy to an account he already has; $0 on free tier;
   no ops; cookieless = no banner; **public/shareable dashboard** to "build in public."
   This persona is the wedge — he feels the ops pain *and* the SaaS-fee pain.
 
@@ -74,7 +74,7 @@ Four personas, ranked by how central they are to the wedge. Reach estimates feed
 - **JTBD:** *"When the business asks for traffic numbers, I need accurate-enough analytics that
   are demonstrably compliant (no consent banner, data not shipped to a US ad vendor) and that I
   can stand behind to a DPO."*
-- **Why Stratus wins:** Cookieless-by-architecture (no client storage at all → ePrivacy Art.
+- **Why Skopia wins:** Cookieless-by-architecture (no client storage at all → ePrivacy Art.
   5(3) doesn't trigger, §3 ✅); optional last-byte IP truncation + configurable retention to
   clear CNIL Sheet 16 and German TDDDG §25 bars; data lives in the org's own Cloudflare account.
   The **server-side / no-JS collection mode** (fast-follow) is the closer for the strictest
@@ -84,7 +84,7 @@ Four personas, ranked by how central they are to the wedge. Reach estimates feed
 - **Who:** Small web/dev agency running analytics across many client sites.
 - **JTBD:** *"I want one analytics deploy that covers all my clients' sites, that I can hand a
   client a link to, and that doesn't add a per-site SaaS bill or a server I have to maintain."*
-- **Why Stratus wins:** **Multi-site** in one deploy; per-site public/shareable dashboards as a
+- **Why Skopia wins:** **Multi-site** in one deploy; per-site public/shareable dashboards as a
   client deliverable; flat near-zero infra cost regardless of client count (no per-site SaaS
   pricing). Multi-site is therefore MVP-critical, not optional.
 
@@ -92,7 +92,7 @@ Four personas, ranked by how central they are to the wedge. Reach estimates feed
 - **Who:** Founder/PM who needs conversion insight, not just traffic counts.
 - **JTBD:** *"I want to see where users drop off in signup/checkout without paying for Plausible
   Business or standing up PostHog."*
-- **Why Stratus wins:** **Free funnel UI** — funnels are the single most-requested feature
+- **Why Skopia wins:** **Free funnel UI** — funnels are the single most-requested feature
   beyond core and are gated to Plausible Business / a Matomo paid plugin and absent in
   Fathom/Umami-UI/GoatCounter (§2 Tier C). A free, polished funnel builder is a real wedge.
   This persona justifies funnels as the **marquee fast-follow**, not MVP (see §3 rationale).
@@ -255,7 +255,7 @@ real-time → public dashboards → custom events. Multi-site stays (P3 depends 
 
 Our entire pitch is **"every feature unlocked, no feature-gating"** — that is the wedge against
 Plausible CE. AGPL is the license that lets us keep that promise *and* protect it: anyone can
-self-host and modify freely, but a competitor who runs a modified Stratus as a hosted SaaS must
+self-host and modify freely, but a competitor who runs a modified Skopia as a hosted SaaS must
 release their changes. That blocks the failure mode where a closed-source SaaS forks our work,
 adds the polish, and out-markets us while contributing nothing back — exactly the dynamic that
 pushed Plausible itself to AGPL. MIT (Umami's choice) maximizes raw adoption but invites that
@@ -314,7 +314,7 @@ which our personas largely sidestep.
 **For the human (decisions above the agents' pay grade):**
 
 6. **License sign-off:** AGPL-3.0 recommended (§6). Confirm, and decide CLA yes/no.
-7. **Name:** "Stratus" is provisional (CLAUDE.md). Confirm or flag a trademark/availability
+7. **Name:** "Skopia" is provisional (CLAUDE.md). Confirm or flag a trademark/availability
    check before we build brand into the dashboard/docs.
 8. **Wedge posture confirmation:** this spec chooses **"thin & polished core in MVP, funnels +
    server-side as the marquee fast-follow"** over **"push the wedge features into MVP"**

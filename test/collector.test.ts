@@ -11,8 +11,8 @@
  * - POST /e: valid beacon returns 204
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { handleCollect, handlePreflight } from "../src/collector/index";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
 import { applyMigrations } from "./apply-migrations";
@@ -53,10 +53,10 @@ function makeBeaconRequest(
     "User-Agent": opts?.ua ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0",
     "Accept-Language": opts?.acceptLanguage ?? "en-US,en;q=0.9",
   };
-  if (opts?.origin) headers["Origin"] = opts.origin;
+  if (opts?.origin) headers.Origin = opts.origin;
   if (opts?.ip) headers["CF-Connecting-IP"] = opts.ip;
 
-  const req = new Request("https://stratus.test/e", {
+  const req = new Request("https://skopia.test/e", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -73,7 +73,7 @@ function makeBeaconRequest(
 // ---------------------------------------------------------------------------
 describe("handlePreflight", () => {
   it("returns 204 with CORS headers", () => {
-    const req = new Request("https://stratus.test/e", {
+    const req = new Request("https://skopia.test/e", {
       method: "OPTIONS",
       headers: { Origin: "https://example.com" },
     });
@@ -84,7 +84,7 @@ describe("handlePreflight", () => {
   });
 
   it("returns 400 when no Origin header", () => {
-    const req = new Request("https://stratus.test/e", { method: "OPTIONS" });
+    const req = new Request("https://skopia.test/e", { method: "OPTIONS" });
     const res = handlePreflight(req, env);
     expect(res.status).toBe(400);
   });
@@ -95,7 +95,7 @@ describe("handlePreflight", () => {
 // ---------------------------------------------------------------------------
 describe("handleCollect — validation", () => {
   it("rejects non-POST with 405", async () => {
-    const req = new Request("https://stratus.test/e", { method: "GET" });
+    const req = new Request("https://skopia.test/e", { method: "GET" });
     Object.defineProperty(req, "cf", { value: {}, writable: false });
     const ctx = createExecutionContext();
     const res = await handleCollect(req, env, ctx);
@@ -223,6 +223,43 @@ describe("handleCollect — bot drop", () => {
     );
     const ctx = createExecutionContext();
     const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(204);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collect — secret guard (fail-closed)
+// ---------------------------------------------------------------------------
+describe("handleCollect — secret guard", () => {
+  it("returns 503 when IDENTITY_HMAC_SECRET is unset", async () => {
+    const envWithoutSecret = { ...env, IDENTITY_HMAC_SECRET: "" } as typeof env;
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, envWithoutSecret, ctx);
+    expect(res.status).toBe(503);
+    const body = await res.text();
+    expect(body).toContain("collector not configured");
+  });
+
+  it("returns 503 when IDENTITY_HMAC_SECRET is explicitly undefined", async () => {
+    const envWithoutSecret = { ...env, IDENTITY_HMAC_SECRET: undefined } as unknown as typeof env;
+    const req = makeBeaconRequest({ t: "pv", s: "open-site", p: "/" }, { ip: "1.2.3.4" });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, envWithoutSecret, ctx);
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 204 (happy path) when IDENTITY_HMAC_SECRET is set", async () => {
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
     expect(res.status).toBe(204);
   });
 });

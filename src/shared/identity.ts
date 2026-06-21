@@ -1,5 +1,5 @@
 /**
- * Stratus — cookieless visitor identity (foundation-owned signatures, FINAL).
+ * Skopia — cookieless visitor identity (foundation-owned signatures, FINAL).
  *
  * The visitor id is a daily-salted HMAC over (ip, ua, site_id). The raw IP is
  * NEVER persisted; the salt rotates at UTC midnight and yesterday's salt is

@@ -1,5 +1,5 @@
 /**
- * Stratus — D1 read layer (foundation-owned signatures, FINAL).
+ * Skopia — D1 read layer (foundation-owned signatures, FINAL).
  *
  * Every read the dashboard needs, returning the view-model types from
  * shared/types.ts. Signatures are final — only bodies are implemented here.
@@ -36,21 +36,13 @@ export async function getSite(db: D1Database, siteId: string): Promise<SiteRow |
 }
 
 /** A single site by its public share token, or null (spec §7.1). */
-export async function getSiteByPublicToken(
-  db: D1Database,
-  token: string,
-): Promise<SiteRow | null> {
-  return db
-    .prepare("SELECT * FROM sites WHERE public_token = ?")
-    .bind(token)
-    .first<SiteRow>();
+export async function getSiteByPublicToken(db: D1Database, token: string): Promise<SiteRow | null> {
+  return db.prepare("SELECT * FROM sites WHERE public_token = ?").bind(token).first<SiteRow>();
 }
 
 /** The owner user (single-owner MVP), or null before first-run setup. */
 export async function getOwner(db: D1Database): Promise<UserRow | null> {
-  return db
-    .prepare("SELECT * FROM users WHERE role = 'owner' LIMIT 1")
-    .first<UserRow>();
+  return db.prepare("SELECT * FROM users WHERE role = 'owner' LIMIT 1").first<UserRow>();
 }
 
 /** Goal definitions for a site (spec §4.2). */

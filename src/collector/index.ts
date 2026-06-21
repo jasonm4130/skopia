@@ -1,15 +1,23 @@
 /**
- * Stratus — collector (the ingestion hot path).
+ * Skopia — collector (the ingestion hot path).
  *
  * Routed at `OPTIONS /e` (CORS preflight) and `POST /e` (beacon). Pipeline per
  * the spec §3: CORS allowlist -> validate -> bot drop -> enrich -> cookieless
  * identity -> `WAE.writeDataPoint` -> bump SiteLive DO via waitUntil -> 204.
  */
 
+import {
+  bucketScreenWidth,
+  enrichFromCf,
+  isBot,
+  parseReferrerHost,
+  parseUserAgent,
+  parseUtm,
+} from "../shared/cf";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
 import type { Beacon, Env, WaeEvent } from "../shared/types";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../shared/types";
-import { enrichFromCf, isBot, parseReferrerHost, parseUserAgent, parseUtm, bucketScreenWidth } from "../shared/cf";
-import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
 
 // ---------------------------------------------------------------------------
 // CORS helpers
@@ -28,13 +36,8 @@ const CORS_HEADERS_BASE = {
  * existence check) into a single SELECT. Returns null when the site does not
  * exist, [] when it exists but has no/empty allowlist, or the list of origins.
  */
-async function getSiteAllowlist(
-  env: Env,
-  siteId: string,
-): Promise<string[] | null> {
-  const row = await env.DB.prepare(
-    "SELECT origin_allowlist FROM sites WHERE id = ?",
-  )
+async function getSiteAllowlist(env: Env, siteId: string): Promise<string[] | null> {
+  const row = await env.DB.prepare("SELECT origin_allowlist FROM sites WHERE id = ?")
     .bind(siteId)
     .first<{ origin_allowlist: string | null }>();
 
@@ -169,16 +172,27 @@ export async function handleCollect(
     }
   }
 
-  // ---------- 8. Cookieless identity ----------
+  // ---------- 8. Secret guard (fail-closed before any crypto) ----------
+  try {
+    requireSecrets(env, ["IDENTITY_HMAC_SECRET"]);
+  } catch (err) {
+    if (err instanceof SecretsMissingError) {
+      return new Response("collector not configured", {
+        status: 503,
+        headers: origin ? corsHeaders(origin) : {},
+      });
+    }
+    throw err;
+  }
+
+  // ---------- 9. Cookieless identity ----------
   const ip =
-    request.headers.get("CF-Connecting-IP") ??
-    request.headers.get("X-Forwarded-For") ??
-    "0.0.0.0";
+    request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "0.0.0.0";
   const today = utcDay(new Date());
   const salt = await getDailySalt(env.SALT, today);
   const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
 
-  // ---------- 9. Parse client-supplied fields ----------
+  // ---------- 10. Parse client-supplied fields ----------
   const referrerHost = parseReferrerHost(beacon.r);
   const utm = parseUtm(beacon.p);
 
@@ -194,7 +208,7 @@ export async function handleCollect(
     propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
   }
 
-  // ---------- 10. Build WAE event ----------
+  // ---------- 11. Build WAE event ----------
   const isPageview = beacon.t === "pv" ? 1 : 0;
   const waeEvent: WaeEvent = {
     siteId,
@@ -216,24 +230,26 @@ export async function handleCollect(
     screenWidth: beacon.w ?? 0,
   };
 
-  // ---------- 11. Write to WAE (synchronous) ----------
+  // ---------- 12. Write to WAE (synchronous) ----------
   env.WAE.writeDataPoint(toDataPoint(waeEvent));
 
-  // ---------- 12. Bump SiteLive DO (async, non-blocking) ----------
+  // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
   const doId = env.SITE_LIVE.idFromName(siteId);
   const doStub = env.SITE_LIVE.get(doId);
   ctx.waitUntil(
-    doStub.fetch(
-      new Request("https://do-internal/hit", {
-        method: "POST",
-        body: JSON.stringify({ vid, path: beacon.p }),
+    doStub
+      .fetch(
+        new Request("https://do-internal/hit", {
+          method: "POST",
+          body: JSON.stringify({ vid, path: beacon.p }),
+        }),
+      )
+      .catch(() => {
+        // DO is best-effort; don't let failures kill the beacon response
       }),
-    ).catch(() => {
-      // DO is best-effort; don't let failures kill the beacon response
-    }),
   );
 
-  // ---------- 13. Respond 204 ----------
+  // ---------- 14. Respond 204 ----------
   return new Response(null, {
     status: 204,
     headers: origin ? corsHeaders(origin) : {},

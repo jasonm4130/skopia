@@ -64,3 +64,14 @@ Wrangler versions — pin a known-good Wrangler in CI and re-verify on upgrades.
 routing remains a documented manual step (acceptable — `workers.dev` covers TTFD). DO migrations
 must be present in `wrangler.jsonc` or the deploy fails — keep the migration tag in sync with the
 SiteLive class.
+
+## Addendum — 2026-06-21 (harden-and-launch sprint)
+
+**Static assets** (Latin-subset fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono; and
+vendored jsVectorMap 1.6.0) ship inside the Worker version via Cloudflare Workers Static
+Assets (`public/` directory, same Worker — implements ADR-0005's single-Worker topology).
+Nothing to provision; no CDN dependency at runtime.
+
+**Secrets prompt:** the Deploy button prompts for all four secrets (`AUTH_COOKIE_SECRET`,
+`IDENTITY_HMAC_SECRET`, `CF_ACCOUNT_ID`, `WAE_API_TOKEN`) as declared in `package.json`
+`cloudflare.bindings`. The README documents how to generate each one before clicking Deploy.
