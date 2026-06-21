@@ -13,6 +13,7 @@ import { handleCollect, handlePreflight } from "./collector";
 import { handleScheduled } from "./rollup";
 import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
+import { STRATUS_JS } from "./shared/stratus-embed";
 
 // Re-export the Durable Object class so the wrangler migration (new_sqlite_classes:
 // ["SiteLive"]) and the SITE_LIVE binding resolve against this entry point.
@@ -31,11 +32,16 @@ app.post("/e", (c) =>
   handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext),
 );
 
-// Serve the built tracking script (the SCRIPT agent wires asset delivery).
-app.get("/stratus.js", (c) => {
-  void c;
-  throw new Error("not implemented");
-});
+// Serve the built, minified tracking script. STRATUS_JS is generated at build
+// time by `npm run build:script` (esbuild → scripts/build-embed.mjs) and
+// embedded as a string constant so the Worker has zero FS/asset deps at runtime.
+// The served bytes equal what scripts/check-script-size.mjs measures.
+app.get("/stratus.js", (c) =>
+  c.text(STRATUS_JS, 200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "public, max-age=3600",
+  }),
+);
 
 // App + marketing surfaces. Dashboard owns auth-gated routes and the realtime
 // proxy; marketing owns the public landing page. Order: dashboard first so its

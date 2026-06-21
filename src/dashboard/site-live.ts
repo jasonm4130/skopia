@@ -6,51 +6,171 @@
  * Alarm), and treats the map size as the live-visitor count. Dashboards connect
  * over a hibernatable WebSocket (`acceptWebSocket`/`getWebSockets`) and receive
  * the count + top active pages on change.
- *
- * Foundation provides the typed class skeleton; the DASHBOARD/realtime agent
- * implements the live-count logic. Stubs throw until implemented.
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { Env, LiveSnapshot } from "../shared/types";
+import type { Env, BreakdownRow, LiveSnapshot } from "../shared/types";
+
+/** TTL for a visitor in the live map: 5 minutes in ms. */
+const VISITOR_TTL_MS = 5 * 60 * 1000;
+
+/** Alarm tick interval: 30 seconds. */
+const ALARM_INTERVAL_MS = 30_000;
+
+interface VisitorEntry {
+  lastSeen: number;
+  path: string;
+}
 
 export class SiteLive extends DurableObject<Env> {
+  /** vid -> { lastSeen, path } */
+  private visitors = new Map<string, VisitorEntry>();
+
   /**
-   * HTTP entry: `/hit` (collector bumps a vid via waitUntil) and `/live`
-   * (dashboard opens the WebSocket). Implemented by the realtime agent.
+   * HTTP entry:
+   *   POST /hit  — collector bumps a vid via waitUntil
+   *   GET  /live — dashboard upgrades to WebSocket
    */
   override async fetch(request: Request): Promise<Response> {
-    void request;
-    throw new Error("not implemented");
+    const url = new URL(request.url);
+
+    if (url.pathname === "/hit") {
+      return this.handleHit(request);
+    }
+
+    if (url.pathname === "/live") {
+      return this.handleLiveWs(request);
+    }
+
+    return new Response("Not found", { status: 404 });
   }
 
-  /** Hibernation-API message handler (WS clients). */
+  private async handleHit(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const vid = url.searchParams.get("vid") ?? "unknown";
+    const path = url.searchParams.get("path") ?? "/";
+
+    this.visitors.set(vid, { lastSeen: Date.now(), path });
+
+    // Schedule alarm to evict stale entries (idempotent — only schedules if
+    // no alarm is already set for this DO).
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null) {
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    }
+
+    // Push updated snapshot to all connected dashboard WebSockets.
+    this.broadcast();
+
+    return new Response(null, { status: 204 });
+  }
+
+  private handleLiveWs(request: Request): Response {
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    // WebSocketPair exposes its sockets at indices 0 and 1.
+    const client = pair[0];
+    const server = pair[1];
+
+    // Use the Hibernation API so the DO can sleep between messages.
+    this.ctx.acceptWebSocket(server);
+
+    // Send the current snapshot immediately on connect.
+    server.send(JSON.stringify(this.currentSnapshot()));
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Hibernation-API message handler — clients can send "ping" for a refresh. */
   override async webSocketMessage(
     ws: WebSocket,
     message: string | ArrayBuffer,
   ): Promise<void> {
-    void ws, void message;
-    throw new Error("not implemented");
+    const text = typeof message === "string" ? message : new TextDecoder().decode(message);
+    if (text === "ping") {
+      ws.send(JSON.stringify(this.currentSnapshot()));
+    }
   }
 
-  /** Hibernation-API close handler. */
+  /** Hibernation-API close handler — nothing to clean up (session is gone). */
   override async webSocketClose(
     ws: WebSocket,
     code: number,
     reason: string,
     wasClean: boolean,
   ): Promise<void> {
-    void ws, void code, void reason, void wasClean;
-    throw new Error("not implemented");
+    void code, void reason, void wasClean;
+    try {
+      ws.close();
+    } catch {
+      // already closed
+    }
   }
 
   /** Eviction tick: drop visitors not seen in the last 5 minutes (spec §6). */
   override async alarm(): Promise<void> {
-    throw new Error("not implemented");
+    const cutoff = Date.now() - VISITOR_TTL_MS;
+    let evicted = false;
+
+    for (const [vid, entry] of this.visitors) {
+      if (entry.lastSeen < cutoff) {
+        this.visitors.delete(vid);
+        evicted = true;
+      }
+    }
+
+    if (evicted) {
+      this.broadcast();
+    }
+
+    // Reschedule only while there are still live visitors to watch.
+    if (this.visitors.size > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    }
   }
 
   /** Current live snapshot (count + top active pages). */
   async snapshot(): Promise<LiveSnapshot> {
-    throw new Error("not implemented");
+    return this.currentSnapshot();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  private currentSnapshot(): LiveSnapshot {
+    const pageCounts = new Map<string, number>();
+    for (const { path } of this.visitors.values()) {
+      pageCounts.set(path, (pageCounts.get(path) ?? 0) + 1);
+    }
+
+    const total = this.visitors.size;
+    const topPages: BreakdownRow[] = Array.from(pageCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([label, count]) => ({
+        label,
+        pageviews: count,
+        visitors: count,
+        share: total > 0 ? count / total : 0,
+        sampled: false,
+      }));
+
+    return { visitors: total, topPages };
+  }
+
+  private broadcast(): void {
+    const payload = JSON.stringify(this.currentSnapshot());
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(payload);
+      } catch {
+        // ignore closed sockets
+      }
+    }
   }
 }
