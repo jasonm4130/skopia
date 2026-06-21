@@ -1,5 +1,5 @@
 /**
- * Stratus — cold-account D1 bootstrap (foundation-owned).
+ * Skopia — cold-account D1 bootstrap (foundation-owned).
  *
  * Auto-provisioning (the Deploy button) creates an EMPTY D1; it never runs
  * `migrations/`. {@link ensureSchema} applies the embedded schema idempotently

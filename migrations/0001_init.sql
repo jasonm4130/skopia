@@ -1,4 +1,4 @@
--- Stratus D1 schema — initial migration.
+-- Skopia D1 schema — initial migration.
 -- Source of truth: docs/specs/2026-06-21-technical-spec.md §4.2.
 --
 -- The hot path (collector) NEVER writes here. Metadata is written by the

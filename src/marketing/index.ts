@@ -1,8 +1,8 @@
 /**
- * Stratus — marketing / landing surface.
+ * Skopia — marketing / landing surface.
  *
  * Implements GET "/" — a fully server-rendered landing page matching
- * design/Stratus Marketing.dc.html. The cost calculator and FAQ accordion
+ * design/Skopia Marketing.dc.html. The cost calculator and FAQ accordion
  * run as small inline client scripts; no external JS or CSS.
  *
  * Route contract: owns GET "/" only. Never shadows /app, /login, /public, /live.
@@ -42,10 +42,10 @@ const CLIENT_SCRIPT = `
     document.getElementById('calc-pv').textContent=fmt(pv);
     document.getElementById('calc-cost').textContent='$'+cost;
     document.getElementById('calc-note').textContent=cost===0
-      ? "You're inside Cloudflare's free tier (up to ~3M events/mo) — $0/mo. Stratus is open source, so there's nothing else to pay."
+      ? "You're inside Cloudflare's free tier (up to ~3M events/mo) — $0/mo. Skopia is open source, so there's nothing else to pay."
       : cost===5
         ? "You're on the Workers Paid plan ($5/mo base). WAE and Workers capacity up to 10M events/mo are included — no meaningful overage."
-        : "Roughly $"+cost+"/mo on Cloudflare Workers + Analytics Engine at this volume. Stratus stays free — you only pay Cloudflare for what you use.";
+        : "Roughly $"+cost+"/mo on Cloudflare Workers + Analytics Engine at this volume. Skopia stays free — you only pay Cloudflare for what you use.";
   }
   var slider=document.getElementById('calc-slider');
   if(slider){
@@ -85,11 +85,11 @@ interface FaqItem {
 const FAQ: FaqItem[] = [
   {
     q: "Where does my data live?",
-    a: "In your own Cloudflare account, inside a D1 database you provision. Stratus has no central server and never sees your visitors — the data never leaves your infrastructure.",
+    a: "In your own Cloudflare account, inside a D1 database you provision. Skopia has no central server and never sees your visitors — the data never leaves your infrastructure.",
   },
   {
     q: "Is it really compliant without a consent banner?",
-    a: "Stratus sets no cookies, stores no personal data, and never tracks people across sites — so in most jurisdictions no consent banner is required. As always, confirm your specific obligations with counsel.",
+    a: "Skopia sets no cookies, stores no personal data, and never tracks people across sites — so in most jurisdictions no consent banner is required. As always, confirm your specific obligations with counsel.",
   },
   {
     q: "What does it actually cost to run?",
@@ -101,11 +101,11 @@ const FAQ: FaqItem[] = [
   },
   {
     q: "Can I migrate from Google Analytics or Plausible?",
-    a: "Yes. Import historical data from a CSV export and Stratus maps the common metrics — visitors, pageviews, sources and pages — into your new dashboard.",
+    a: "Yes. Import historical data from a CSV export and Skopia maps the common metrics — visitors, pageviews, sources and pages — into your new dashboard.",
   },
   {
     q: "Do I have to manage a database?",
-    a: "No. `stratus deploy` provisions Cloudflare D1 for you. There's nothing to patch, scale, or back up — Cloudflare handles the infrastructure.",
+    a: "No. `skopia deploy` provisions Cloudflare D1 for you. There's nothing to patch, scale, or back up — Cloudflare handles the infrastructure.",
   },
 ];
 
@@ -143,14 +143,14 @@ function landingPage(nonce: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stratus — Privacy-first analytics on Cloudflare</title>
+<title>Skopia — Privacy-first analytics on Cloudflare</title>
 <meta name="description" content="Open-source, cookieless web analytics that runs on your own Cloudflare account. One command to deploy.">
 <style nonce="${nonce}">
 *{box-sizing:border-box;}
 html{scroll-behavior:smooth;}
 html,body{margin:0;background:#0a0c11;}
 a{text-decoration:none;color:inherit;}
-@keyframes stratusPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+@keyframes skopiaPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 input[type=range]{-webkit-appearance:none;appearance:none;height:6px;border-radius:4px;background:#20252f;outline:none;}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:#4d86ff;cursor:pointer;border:3px solid #0a0c11;box-shadow:0 0 0 1px #4d86ff;}
 input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#4d86ff;cursor:pointer;border:3px solid #0a0c11;}
@@ -190,7 +190,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
         <div style="width:13px;height:2.5px;border-radius:2px;background:#4d86ff;opacity:.7;"></div>
         <div style="width:16px;height:2.5px;border-radius:2px;background:#4d86ff;opacity:.45;"></div>
       </div>
-      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:19px;letter-spacing:-.01em;color:#fff;">Stratus</span>
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:19px;letter-spacing:-.01em;color:#fff;">Skopia</span>
     </a>
     <div style="display:flex;align-items:center;gap:30px;font-size:14px;color:#9097a8;">
       <a href="#features" style="cursor:pointer;">Features</a>
@@ -209,7 +209,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
   <div style="flex:1;position:relative;padding-top:8px;">
     <div style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#8fb0ff;background:rgba(77,134,255,.1);padding:7px 13px;border-radius:20px;margin-bottom:32px;">open source &middot; runs on your cloudflare</div>
     <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:64px;line-height:1.0;letter-spacing:-.035em;color:#fff;margin:0 0 26px;">Your analytics.<br>One command.<br><span style="color:#6a7184;">Zero ops.</span></h1>
-    <p style="font-size:19px;line-height:1.6;color:#9aa1b2;max-width:452px;margin:0 0 38px;">Stratus deploys to your own Cloudflare account in one command &mdash; no database to babysit, no cookies, no consent banner. You own every row of data.</p>
+    <p style="font-size:19px;line-height:1.6;color:#9aa1b2;max-width:452px;margin:0 0 38px;">Skopia deploys to your own Cloudflare account in one command &mdash; no database to babysit, no cookies, no consent banner. You own every row of data.</p>
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:46px;">
       <a href="/login" style="background:#4d86ff;color:#fff;padding:15px 26px;border-radius:10px;font-weight:600;font-size:16px;box-shadow:0 8px 26px rgba(77,134,255,.32);cursor:pointer;">Deploy to Cloudflare &#8594;</a>
       <a href="/app" style="display:flex;align-items:center;gap:8px;padding:15px 22px;border-radius:10px;font-weight:600;font-size:16px;color:#e8eaef;border:1px solid #2a3040;cursor:pointer;">Live demo</a>
@@ -230,7 +230,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
       </div>
       <div style="padding:24px 24px 28px;font-family:'JetBrains Mono',monospace;font-size:13.5px;line-height:2;">
         <div style="color:#6a7184;"># deploy to your own account</div>
-        <div style="color:#e7e9ee;"><span style="color:#2bd888;">$</span> npx stratus deploy</div>
+        <div style="color:#e7e9ee;"><span style="color:#2bd888;">$</span> npx skopia deploy</div>
         <div style="color:#6a7184;margin-top:2px;">&nbsp;&nbsp;&#10003; Worker live</div>
         <div style="color:#6a7184;">&nbsp;&nbsp;&#10003; D1 database ready</div>
         <div style="color:#6a7184;">&nbsp;&nbsp;&#10003; done in <span style="color:#9fb4ff;">8.2s</span></div>
@@ -268,7 +268,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
     <div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#4d86ff;margin-bottom:18px;">01</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:19px;color:#fff;margin-bottom:11px;">Run one command</div>
-      <p style="font-size:15px;line-height:1.65;color:#8b92a4;margin:0;">Stratus provisions a Worker and a D1 database in your Cloudflare account. Nothing leaves your infrastructure.</p>
+      <p style="font-size:15px;line-height:1.65;color:#8b92a4;margin:0;">Skopia provisions a Worker and a D1 database in your Cloudflare account. Nothing leaves your infrastructure.</p>
     </div>
     <div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#4d86ff;margin-bottom:18px;">02</div>
@@ -295,13 +295,13 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
         <span style="width:11px;height:11px;border-radius:50%;background:#2c313d;"></span>
         <span style="width:11px;height:11px;border-radius:50%;background:#2c313d;"></span>
         <span style="width:11px;height:11px;border-radius:50%;background:#2c313d;"></span>
-        <span style="margin-left:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;background:#0d1016;border:1px solid #20252f;padding:4px 12px;border-radius:6px;">app.you.dev/stratus</span>
+        <span style="margin-left:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;background:#0d1016;border:1px solid #20252f;padding:4px 12px;border-radius:6px;">app.you.dev/skopia</span>
       </div>
       <div style="padding:26px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
           <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:17px;color:#fff;">Overview</div>
           <span style="display:flex;align-items:center;gap:7px;font-size:12px;color:#2bd888;background:rgba(43,216,136,.1);padding:6px 12px;border-radius:8px;">
-            <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:stratusPulse 1.6s infinite;"></span> 24 online
+            <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span> 24 online
           </span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;">
@@ -344,7 +344,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
 
 <!-- ===== FEATURES (bento) ===== -->
 <div id="features" style="max-width:1180px;margin:0 auto;padding:104px 32px;">
-  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:#6a7184;margin-bottom:14px;">Why Stratus</div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:#6a7184;margin-bottom:14px;">Why Skopia</div>
   <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:38px;letter-spacing:-.025em;color:#fff;margin:0 0 52px;max-width:560px;line-height:1.08;">Yours to own. Effortless to run.</h2>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
     <div style="grid-column:span 2;background:linear-gradient(135deg,#12151d,#141a26);border:1px solid #2a3550;border-radius:14px;padding:30px 32px;position:relative;overflow:hidden;">
@@ -370,7 +370,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
     </div>
     <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:28px;">
       <div style="width:30px;height:30px;border-radius:7px;background:#0d1016;border:1px solid #2bd888;display:flex;align-items:center;justify-content:center;margin-bottom:20px;">
-        <span style="width:8px;height:8px;border-radius:50%;background:#2bd888;animation:stratusPulse 1.6s infinite;"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
       </div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:9px;">Realtime</div>
       <p style="font-size:14px;line-height:1.6;color:#8b92a4;margin:0;">See visitors the second they land, streamed straight from the edge.</p>
@@ -395,7 +395,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
       <div style="display:grid;grid-template-columns:1.7fr 1fr 1fr 1fr;">
         <div style="padding:22px 28px;border-bottom:1px solid #20252f;"></div>
         <div style="padding:22px 16px;border-bottom:1px solid #20252f;border-left:1px solid #20252f;text-align:center;background:rgba(77,134,255,.07);">
-          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#9fb4ff;">Stratus</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#9fb4ff;">Skopia</div>
         </div>
         <div style="padding:22px 16px;border-bottom:1px solid #20252f;border-left:1px solid #20252f;text-align:center;">
           <div style="font-weight:600;font-size:14px;color:#9aa1b2;">Hosted SaaS</div>
@@ -432,7 +432,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
 <div id="pricing" style="max-width:1180px;margin:0 auto;padding:104px 32px;">
   <div style="text-align:center;margin-bottom:56px;">
     <div style="font-family:'JetBrains Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:#6a7184;margin-bottom:14px;">Pricing</div>
-    <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:38px;letter-spacing:-.025em;color:#fff;margin:0 0 12px;">Stratus is free. You just pay Cloudflare.</h2>
+    <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:38px;letter-spacing:-.025em;color:#fff;margin:0 0 12px;">Skopia is free. You just pay Cloudflare.</h2>
     <p style="font-size:16px;color:#8b92a4;margin:0;">The software is AGPL-3.0 licensed and open source. Your only bill comes from Cloudflare &mdash; and it&apos;s tiny.</p>
   </div>
   <div style="display:flex;gap:18px;align-items:stretch;">
@@ -455,7 +455,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
     <!-- calculator card -->
     <div style="flex:1.15;background:linear-gradient(150deg,#0e1119,#101522);border:1px solid #20252f;border-radius:16px;padding:34px;">
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:17px;color:#fff;margin-bottom:6px;">Estimate your Cloudflare bill</div>
-      <p style="font-size:13.5px;color:#8b92a4;margin:0 0 30px;">Drag to your monthly pageviews. Stratus itself stays $0.</p>
+      <p style="font-size:13.5px;color:#8b92a4;margin:0 0 30px;">Drag to your monthly pageviews. Skopia itself stays $0.</p>
       <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px;">
         <div>
           <div style="font-size:13px;color:#8b92a4;margin-bottom:6px;">Monthly pageviews</div>
@@ -471,7 +471,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
         <span>10K</span><span>3M</span><span>100M</span>
       </div>
       <div id="calc-note" style="background:#0a0c11;border:1px solid #20252f;border-radius:11px;padding:18px 20px;font-size:13.5px;color:#9aa1b2;line-height:1.6;">
-        You&apos;re comfortably inside Cloudflare&apos;s free tier &mdash; $0/mo. Stratus is open source, so there&apos;s nothing else to pay.
+        You&apos;re comfortably inside Cloudflare&apos;s free tier &mdash; $0/mo. Skopia is open source, so there&apos;s nothing else to pay.
       </div>
     </div>
   </div>
@@ -498,7 +498,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
         <a href="/login" style="background:#4d86ff;color:#fff;padding:15px 28px;border-radius:10px;font-weight:600;font-size:16px;box-shadow:0 8px 26px rgba(77,134,255,.34);cursor:pointer;">Deploy to Cloudflare &#8594;</a>
         <a href="/app" style="padding:15px 24px;border-radius:10px;font-weight:600;font-size:16px;color:#e8eaef;border:1px solid #2a3040;cursor:pointer;">See the live demo</a>
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#6a7184;margin-top:30px;">$ npx stratus deploy</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#6a7184;margin-top:30px;">$ npx skopia deploy</div>
     </div>
   </div>
 </div>
@@ -513,7 +513,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
           <div style="width:11px;height:2px;border-radius:2px;background:#4d86ff;opacity:.7;"></div>
           <div style="width:13px;height:2px;border-radius:2px;background:#4d86ff;opacity:.45;"></div>
         </div>
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Stratus</span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
       </div>
       <p style="font-size:13.5px;color:#6a7184;line-height:1.6;margin:0;">Open-source, privacy-first web analytics that runs on your own Cloudflare account.</p>
     </div>
@@ -534,7 +534,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
   </div>
   <div style="border-top:1px solid #161a22;">
     <div style="max-width:1180px;margin:0 auto;display:flex;justify-content:space-between;padding:20px 32px;font-size:12.5px;color:#5a6072;">
-      <span>&copy; 2026 Stratus &middot; AGPL-3.0 licensed</span>
+      <span>&copy; 2026 Skopia &middot; AGPL-3.0 licensed</span>
       <span style="font-family:'JetBrains Mono',monospace;">cookieless &middot; no consent banner required</span>
     </div>
   </div>

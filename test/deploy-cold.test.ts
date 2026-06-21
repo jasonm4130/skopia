@@ -1,7 +1,7 @@
 /**
  * deploy-cold.test.ts — cold-account graceful-degradation integration tests.
  *
- * Simulates the state a freshly-deployed Stratus Worker sees:
+ * Simulates the state a freshly-deployed Skopia Worker sees:
  *   - Empty D1 (no migrations run by setup, only the Worker's own ensureSchema)
  *   - One or more crypto secrets unset (empty string)
  *
@@ -80,7 +80,7 @@ async function workerFetch(
 }
 
 function makeCollectorRequest(siteId = "default"): Request {
-  return new Request("https://stratus.test/e", {
+  return new Request("https://skopia.test/e", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -136,7 +136,7 @@ describe("cold-account: dashboard login with missing AUTH_COOKIE_SECRET", () => 
     body.append("email", "owner@cold-test.dev");
     body.append("password", "password123"); // wrong hash so verifyPassword returns false
 
-    const req = new Request("https://stratus.test/login", {
+    const req = new Request("https://skopia.test/login", {
       method: "POST",
       body,
     });
@@ -157,7 +157,7 @@ describe("cold-account: dashboard login with missing AUTH_COOKIE_SECRET", () => 
     body.append("email", "owner@cold-test.dev");
     body.append("password", "password123");
 
-    const req = new Request("https://stratus.test/login", {
+    const req = new Request("https://skopia.test/login", {
       method: "POST",
       body,
     });
@@ -166,7 +166,7 @@ describe("cold-account: dashboard login with missing AUTH_COOKIE_SECRET", () => 
 
     // No Set-Cookie header with a session value
     const cookie = res.headers.get("set-cookie") ?? "";
-    expect(cookie).not.toContain("stratus_session=");
+    expect(cookie).not.toContain("skopia_session=");
   });
 });
 
@@ -176,7 +176,7 @@ describe("cold-account: /setup after schema bootstrap", () => {
     // The dashboard middleware calls ensureSchema automatically.
     vi.mocked(queries.getOwner).mockResolvedValue(null);
 
-    const res = await workerFetch(new Request("https://stratus.test/setup"), env as unknown as Env);
+    const res = await workerFetch(new Request("https://skopia.test/setup"), env as unknown as Env);
     expect(res.status).toBe(200);
     const text = await res.text();
     // The setup form must be present
@@ -186,7 +186,7 @@ describe("cold-account: /setup after schema bootstrap", () => {
   it("GET /setup redirects to /login when an owner already exists", async () => {
     vi.mocked(queries.getOwner).mockResolvedValue(MOCK_OWNER);
 
-    const res = await workerFetch(new Request("https://stratus.test/setup"), env as unknown as Env);
+    const res = await workerFetch(new Request("https://skopia.test/setup"), env as unknown as Env);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/login");
   });

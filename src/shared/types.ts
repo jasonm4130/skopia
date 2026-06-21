@@ -1,5 +1,5 @@
 /**
- * Stratus — shared types (foundation-owned, FINAL).
+ * Skopia — shared types (foundation-owned, FINAL).
  *
  * This module is the contract every feature agent codes against. The WAE slot
  * mapping, D1 row shapes, dashboard view-models, and the `Env` binding interface

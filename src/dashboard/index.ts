@@ -1,5 +1,5 @@
 /**
- * Stratus — dashboard Worker surface (SSR + auth + realtime proxy).
+ * Skopia — dashboard Worker surface (SSR + auth + realtime proxy).
  *
  * Hono sub-app mounted at "/" by src/index.ts. Owns:
  *   /setup            — first-run owner account creation
@@ -68,7 +68,7 @@ dashboard.use("*", async (c, next) => {
 // Auth helpers
 // ---------------------------------------------------------------------------
 
-const COOKIE_NAME = "stratus_session";
+const COOKIE_NAME = "skopia_session";
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
 
 async function getHmacKey(secret: string): Promise<CryptoKey> {
@@ -304,7 +304,7 @@ const BASE_CSS = `
   ::-webkit-scrollbar{width:10px;height:10px;}
   ::-webkit-scrollbar-thumb{background:#232838;border-radius:6px;}
   ::-webkit-scrollbar-track{background:transparent;}
-  @keyframes stratusPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @keyframes skopiaPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 `.trim();
 
 function htmlDoc(title: string, head: string, body: string, nonce: string): string {
@@ -313,7 +313,7 @@ function htmlDoc(title: string, head: string, body: string, nonce: string): stri
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — Stratus</title>
+<title>${esc(title)} — Skopia</title>
 <style nonce="${nonce}">${BASE_CSS}</style>
 ${head}
 </head>
@@ -327,7 +327,7 @@ ${body}
 // Sidebar & app layout
 // ---------------------------------------------------------------------------
 
-function stratusLogo(): string {
+function skopiaLogo(): string {
   return `<div style="display:flex;flex-direction:column;gap:2px;">
     <div style="width:15px;height:2px;border-radius:2px;background:#4d86ff;"></div>
     <div style="width:11px;height:2px;border-radius:2px;background:#4d86ff;opacity:.7;"></div>
@@ -361,8 +361,8 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
 
   return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
     <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
-      ${stratusLogo()}
-      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Stratus</span>
+      ${skopiaLogo()}
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
     <div style="display:flex;align-items:center;gap:9px;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;margin-bottom:24px;">
       <span style="width:8px;height:8px;border-radius:2px;background:#4d86ff;"></span>
@@ -371,7 +371,7 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
     ${navHtml}
     <div style="margin-top:auto;background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
       <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">stratus · d1 ok</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">skopia · d1 ok</div>
     </div>
   </div>`;
 }
@@ -388,7 +388,7 @@ function appLayout(
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:stratusPulse 1.6s infinite;"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
         <span id="live-count">—</span> online now
       </div>
       ${headerRight}
@@ -719,8 +719,8 @@ function loginPage(nonce: string, error?: string): string {
     `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
     <div style="width:360px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
-        ${stratusLogo()}
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Stratus</span>
+        ${skopiaLogo()}
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
         <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:24px;">Sign in</div>
@@ -760,7 +760,7 @@ function notConfiguredPage(nonce: string, missing: string[]): string {
     <div style="width:440px;background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:12px;">Not configured</div>
       <div style="font-size:13.5px;color:#cfd4e0;line-height:1.6;margin-bottom:14px;">
-        This Stratus instance is missing required secret${missing.length > 1 ? "s" : ""}: ${names}.
+        This Skopia instance is missing required secret${missing.length > 1 ? "s" : ""}: ${names}.
         Sessions cannot be signed safely until ${missing.length > 1 ? "they are" : "it is"} set.
       </div>
       <div style="font-size:13px;color:#9aa1b2;line-height:1.6;">
@@ -783,11 +783,11 @@ function setupPage(nonce: string, error?: string): string {
     `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
     <div style="width:400px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
-        ${stratusLogo()}
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Stratus</span>
+        ${skopiaLogo()}
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:8px;">Welcome to Stratus</div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:8px;">Welcome to Skopia</div>
         <div style="font-size:13px;color:#9aa1b2;margin-bottom:24px;">Create your owner account to get started.</div>
         ${errorHtml}
         <form method="post" action="/setup">
@@ -987,7 +987,7 @@ dashboard.get("/public/:token", async (c) => {
   const body = `<div style="max-width:1280px;margin:0 auto;padding:32px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
       <div style="display:flex;align-items:center;gap:9px;">
-        ${stratusLogo()}
+        ${skopiaLogo()}
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;color:#fff;">${esc(site.name)}</span>
         <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
       </div>
@@ -1195,7 +1195,7 @@ dashboard.get("/app/geography", async (c) => {
             low <span style="width:60px;height:7px;border-radius:4px;background:linear-gradient(90deg,#202634,#4d86ff);"></span> high
           </div>
         </div>
-        <div id="stratus-map" style="width:100%;height:430px;"></div>
+        <div id="skopia-map" style="width:100%;height:430px;"></div>
       </div>
       <div style="flex:1;min-width:0;background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;">
         <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">Top countries</div>
@@ -1207,9 +1207,9 @@ dashboard.get("/app/geography", async (c) => {
       var vals=${mapValues};
       function fmt(n){return n>=1000000?(n/1000000).toFixed(1).replace(/\\.0$/,'')+'M':n>=1000?(n/1000).toFixed(1).replace(/\\.0$/,'')+'K':String(n);}
       function loadMap(){
-        if(!window.jsVectorMap||!document.getElementById('stratus-map')) return;
+        if(!window.jsVectorMap||!document.getElementById('skopia-map')) return;
         new window.jsVectorMap({
-          selector:'#stratus-map',map:'world',
+          selector:'#skopia-map',map:'world',
           backgroundColor:'transparent',zoomButtons:false,zoomOnScroll:false,
           regionStyle:{initial:{fill:'#1c212c',stroke:'#0d1016',strokeWidth:0.5},hover:{fill:'#6a9bff'}},
           series:{regions:[{attribute:'fill',scale:['#202634','#4d86ff'],normalizeFunction:'polynomial',values:vals}]},

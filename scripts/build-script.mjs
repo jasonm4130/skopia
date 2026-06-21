@@ -9,11 +9,11 @@
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/script/stratus.ts"],
+  entryPoints: ["src/script/skopia.ts"],
   bundle: true,
   minify: true,
   format: "iife",
-  outfile: "dist/stratus.js",
+  outfile: "dist/skopia.js",
 });
 
-console.log("build-script: wrote dist/stratus.js");
+console.log("build-script: wrote dist/skopia.js");

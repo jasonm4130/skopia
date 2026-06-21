@@ -1,8 +1,8 @@
-# Stratus — Cloudflare-native web analytics
+# Skopia — Cloudflare-native web analytics
 
-> **Working name: "Stratus" (provisional).** A privacy-respecting, self-hostable web
-> analytics tool built *entirely* on the Cloudflare developer platform. Think
-> Plausible/Umami, but where the storage, compute, ingestion, and dashboard all run on
+> **Skopia** (Greek *skopeín*, "to observe"; domain **skopia.dev**) — a privacy-respecting,
+> self-hostable web analytics tool built *entirely* on the Cloudflare developer platform.
+> Think Plausible/Umami, but where the storage, compute, ingestion, and dashboard all run on
 > Cloudflare primitives (Workers, Analytics Engine / D1 / R2, Durable Objects, Pages).
 
 This file is the operating contract for any AI agent or human working in this repo. It

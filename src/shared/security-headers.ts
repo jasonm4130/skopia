@@ -1,5 +1,5 @@
 /**
- * Stratus — root security-headers middleware (foundation-owned).
+ * Skopia — root security-headers middleware (foundation-owned).
  *
  * Mounted once at the app root (src/index.ts). Per request it mints a nonce,
  * exposes it via `c.set("nonce", …)` for SSR inline blocks to read with

@@ -1,5 +1,5 @@
 /**
- * Stratus — fail-closed secret guard (foundation-owned).
+ * Skopia — fail-closed secret guard (foundation-owned).
  *
  * Cold deploys leave the crypto secrets unset; reading them as `undefined` makes
  * the collector throw a 500 and the auth path sign cookies with the literal key

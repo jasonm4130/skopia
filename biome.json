@@ -11,7 +11,7 @@
       "!dist",
       "!public",
       "!design",
-      "!src/shared/stratus-embed.ts",
+      "!src/shared/skopia-embed.ts",
       "!src/shared/schema-embed.ts"
     ]
   },

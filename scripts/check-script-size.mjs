@@ -1,9 +1,9 @@
 // Fail the build if the tracking script exceeds the 2 KB gzipped budget.
-// Run after `npm run build:script` (emits dist/stratus.js). Spec §2 / CLAUDE.md.
+// Run after `npm run build:script` (emits dist/skopia.js). Spec §2 / CLAUDE.md.
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
-const FILE = "dist/stratus.js";
+const FILE = "dist/skopia.js";
 const LIMIT = 2048;
 
 let raw;

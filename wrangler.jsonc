@@ -1,5 +1,5 @@
 {
-  // Stratus — single-Worker topology.
+  // Skopia — single-Worker topology.
   //
   // TOPOLOGY DECISION (foundation): ONE Worker hosts everything — the collector
   // HTTP route (`POST /e`), the SSR dashboard + marketing routes, and the
@@ -11,7 +11,7 @@
   // If the collector ever needs to scale independently it can be split out
   // later — the bindings below are already shared-by-design.
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "stratus",
+  "name": "skopia",
   "main": "src/index.ts",
   // Compat date is past 2026-04-07 so `web_socket_auto_reply_to_close` is on by
   // default (spec §6 — the live DO does not hand-handle WS close frames).
@@ -22,14 +22,14 @@
 
   // Raw event ingest. The dataset is created on first `writeDataPoint` — no
   // pre-provisioning needed (spec §7.3). Index = site_id, 1 dp per event.
-  "analytics_engine_datasets": [{ "binding": "WAE", "dataset": "stratus_events" }],
+  "analytics_engine_datasets": [{ "binding": "WAE", "dataset": "skopia_events" }],
 
   // Relational metadata + exact daily rollups (written by cron, read by the
   // dashboard). `database_id` is filled by `wrangler deploy` / the Deploy button.
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "stratus",
+      "database_name": "skopia",
       "database_id": "placeholder-set-on-deploy",
       "migrations_dir": "migrations"
     }
@@ -80,6 +80,6 @@
   // OPT-IN, NOT MVP (spec §9.1) — archival/no-JS fan-out. Declared here as a
   // documented seam so the future archival agent has a home; left commented so
   // the default deploy provisions nothing extra:
-  // "queues": { "producers": [{ "binding": "ARCHIVE_Q", "queue": "stratus-archive" }] },
-  // "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "stratus-archive" }]
+  // "queues": { "producers": [{ "binding": "ARCHIVE_Q", "queue": "skopia-archive" }] },
+  // "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "skopia-archive" }]
 }

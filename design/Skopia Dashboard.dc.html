@@ -15,7 +15,7 @@
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background:#0a0c11; }
-  @keyframes stratusPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  @keyframes skopiaPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #232838; border-radius: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -30,7 +30,7 @@
   <div style="flex:none; width:224px; background:#0d1016; border-right:1px solid #1b1f29; padding:24px 16px; display:flex; flex-direction:column;">
     <div style="display:flex; align-items:center; gap:9px; padding:0 8px; margin-bottom:30px;">
       <div style="display:flex; flex-direction:column; gap:2px;"><div style="width:15px; height:2px; border-radius:2px; background:#4d86ff;"></div><div style="width:11px; height:2px; border-radius:2px; background:#4d86ff; opacity:.7;"></div><div style="width:13px; height:2px; border-radius:2px; background:#4d86ff; opacity:.45;"></div></div>
-      <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;">Stratus</span>
+      <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:#fff;">Skopia</span>
     </div>
     <div style="display:flex; align-items:center; gap:9px; background:#161a23; border:1px solid #232838; border-radius:9px; padding:10px 11px; margin-bottom:24px;">
       <span style="width:8px; height:8px; border-radius:2px; background:#4d86ff;"></span>
@@ -54,7 +54,7 @@
     <div style="flex:none; display:flex; align-items:center; justify-content:space-between; padding:20px 32px; border-bottom:1px solid #1b1f29;">
       <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:19px; color:#fff;">{{ viewTitle }}</div>
       <div style="display:flex; align-items:center; gap:12px; position:relative;">
-        <span style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:#2bd888; background:rgba(43,216,136,.1); padding:8px 13px; border-radius:8px; font-weight:500;"><span style="width:7px; height:7px; border-radius:50%; background:#2bd888; animation:stratusPulse 1.6s infinite;"></span> {{ onlineCount }} online now</span>
+        <span style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:#2bd888; background:rgba(43,216,136,.1); padding:8px 13px; border-radius:8px; font-weight:500;"><span style="width:7px; height:7px; border-radius:50%; background:#2bd888; animation:skopiaPulse 1.6s infinite;"></span> {{ onlineCount }} online now</span>
         <div style="position:relative;">
           <div onClick="{{ toggleRange }}" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:#cfd4e0; border:1px solid #262b38; padding:8px 15px; border-radius:8px; user-select:none;">{{ rangeLabel }} <span style="color:#6a7184;">▾</span></div>
           <sc-if value="{{ rangeOpen }}" hint-placeholder-val="{{ false }}">
@@ -151,7 +151,7 @@
               <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; color:#fff;">Visitors by country</div>
               <div style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:#6a7184; font-family:'JetBrains Mono',monospace;">low <span style="width:60px; height:7px; border-radius:4px; background:linear-gradient(90deg,#202634,#4d86ff);"></span> high</div>
             </div>
-            <div id="stratus-map" style="width:100%; height:430px;"></div>
+            <div id="skopia-map" style="width:100%; height:430px;"></div>
           </div>
           <div style="flex:1; min-width:0; background:#12151d; border:1px solid #20252f; border-radius:12px; padding:20px 22px;">
             <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#fff; margin-bottom:18px;">Top countries</div>
@@ -259,12 +259,12 @@ class Component extends DCLogic {
   maybeMap() {
     const onGeo = this.state.view === 'geography';
     if (!onGeo && this.map) { try { this.map.destroy(); } catch (e) {} this.map = null; return; }
-    if (onGeo && this.libReady && !this.map && window.jsVectorMap && document.getElementById('stratus-map')) {
+    if (onGeo && this.libReady && !this.map && window.jsVectorMap && document.getElementById('skopia-map')) {
       const vals = { US:19800, DE:8100, GB:6200, IN:4400, BR:3100, FR:2600, CA:2300, AU:1900, NL:1500, JP:1300, ES:1100, SE:900, PL:820, IT:760, SG:640 };
       const fmt = this.fmt;
       try {
         this.map = new window.jsVectorMap({
-          selector: '#stratus-map', map: 'world',
+          selector: '#skopia-map', map: 'world',
           backgroundColor: 'transparent', zoomButtons: false, zoomOnScroll: false,
           regionStyle: { initial: { fill: '#1c212c', stroke: '#0d1016', strokeWidth: 0.5 }, hover: { fill: '#6a9bff' } },
           series: { regions: [{ attribute: 'fill', scale: ['#202634', '#4d86ff'], normalizeFunction: 'polynomial', values: vals }] },

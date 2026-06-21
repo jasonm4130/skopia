@@ -1,5 +1,5 @@
 /**
- * Stratus tracking script.
+ * Skopia tracking script.
  *
  * Budget: <2 KB gzipped (CI-enforced). No cookies, no localStorage,
  * no sessionStorage (CI-audited). Everything beyond pathname/referrer/title/
@@ -8,7 +8,7 @@
  * Transport: fetch with keepalive. Fires on visibilitychange===hidden +
  * pagehide fallback (not unload/beforeunload — unreliable on mobile).
  * SPA: monkey-patches history.pushState/replaceState + popstate listener.
- * Custom events: window.stratus('event', name, props) or stratus.track(name, props).
+ * Custom events: window.skopia('event', name, props) or skopia.track(name, props).
  */
 (() => {
   var d = document;
@@ -80,11 +80,11 @@
   type Props = Record<string, string | number | boolean>;
   type Api = { (cmd: string, n: string, p?: Props): void; track(n: string, p?: Props): void };
 
-  // Fix #5 (MED): capture any pre-existing window.stratus (and its .q) BEFORE
-  // overwriting it with the api object. After the overwrite, window.stratus has
+  // Fix #5 (MED): capture any pre-existing window.skopia (and its .q) BEFORE
+  // overwriting it with the api object. After the overwrite, window.skopia has
   // no .q, so reading it post-assignment would always give undefined and lose
   // any events queued by the async-load snippet before the script loaded.
-  var prev = (window as Window & { stratus?: Api & { q?: unknown[][] } }).stratus;
+  var prev = (window as Window & { skopia?: Api & { q?: unknown[][] } }).skopia;
   var preQueue = prev?.q;
 
   var api = ((cmd: string, n: string, p?: Props): void => {
@@ -94,7 +94,7 @@
     send("event", n, p);
   };
 
-  (window as Window & { stratus?: Api }).stratus = api;
+  (window as Window & { skopia?: Api }).skopia = api;
 
   // Drain pre-queued calls (async-load snippet pattern)
   if (preQueue) {

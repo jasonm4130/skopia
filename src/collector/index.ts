@@ -1,5 +1,5 @@
 /**
- * Stratus — collector (the ingestion hot path).
+ * Skopia — collector (the ingestion hot path).
  *
  * Routed at `OPTIONS /e` (CORS preflight) and `POST /e` (beacon). Pipeline per
  * the spec §3: CORS allowlist -> validate -> bot drop -> enrich -> cookieless

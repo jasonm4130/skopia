@@ -1,4 +1,4 @@
-# Stratus
+# Skopia
 
 > Working name (provisional). Privacy-respecting, self-hostable web analytics that runs
 > entirely on the Cloudflare developer platform.
@@ -102,7 +102,7 @@ wrangler deploy
 ```
 
 `pnpm build` regenerates the embedded files — `src/shared/schema-embed.ts`
-(cold-account D1 DDL) and `src/shared/stratus-embed.ts` (the minified tracking
+(cold-account D1 DDL) and `src/shared/skopia-embed.ts` (the minified tracking
 script) — so `wrangler deploy` never ships stale embedded content after a fresh
 clone or a migration change.
 

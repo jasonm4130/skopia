@@ -1,5 +1,5 @@
 /**
- * Stratus — SiteLive Durable Object (per-site live visitor count, spec §6).
+ * Skopia — SiteLive Durable Object (per-site live visitor count, spec §6).
  *
  * One instance per site (`idFromName(site_id)`). Keeps an in-memory
  * `vid -> lastSeen` map, evicts entries older than 5 minutes (driven by a DO

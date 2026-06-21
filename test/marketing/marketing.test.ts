@@ -1,8 +1,8 @@
 /**
- * Stratus — marketing page tests.
+ * Skopia — marketing page tests.
  *
  * Verifies GET "/" returns a well-formed landing page matching the design
- * spec (design/Stratus Marketing.dc.html):
+ * spec (design/Skopia Marketing.dc.html):
  *   - correct status + content-type
  *   - hero headline present
  *   - AGPL-3.0 license copy (not "MIT licensed")
@@ -21,7 +21,7 @@ import worker from "../../src/index";
 
 async function fetchRoot(): Promise<{ res: Response; text: string }> {
   const ctx = createExecutionContext();
-  const res = await worker.fetch(new Request("https://stratus.test/"), env, ctx);
+  const res = await worker.fetch(new Request("https://skopia.test/"), env, ctx);
   await waitOnExecutionContext(ctx);
   const text = await res.text();
   return { res, text };
@@ -52,7 +52,7 @@ describe("marketing landing page", () => {
 
   it("contains the pricing section headline", async () => {
     const { text } = await fetchRoot();
-    expect(text).toContain("Stratus is free. You just pay Cloudflare.");
+    expect(text).toContain("Skopia is free. You just pay Cloudflare.");
   });
 
   it("contains the FAQ section with 'Questions, answered'", async () => {

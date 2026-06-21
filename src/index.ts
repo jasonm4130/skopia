@@ -1,5 +1,5 @@
 /**
- * Stratus — root Worker entry (single-Worker topology).
+ * Skopia — root Worker entry (single-Worker topology).
  *
  * One Worker hosts the collector route, the dashboard + marketing SSR, and the
  * cron `scheduled()` rollup. Bindings are shared (wrangler.jsonc). Feature agents
@@ -13,7 +13,7 @@ import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
 import { handleScheduled } from "./rollup";
 import { type AppEnv, securityHeaders } from "./shared/security-headers";
-import { STRATUS_JS } from "./shared/stratus-embed";
+import { SKOPIA_JS } from "./shared/skopia-embed";
 import type { Env } from "./shared/types";
 
 // Re-export the Durable Object class so the wrangler migration (new_sqlite_classes:
@@ -35,12 +35,12 @@ app.get("/health", (c) => c.text("ok"));
 app.options("/e", (c) => handlePreflight(c.req.raw, c.env));
 app.post("/e", (c) => handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext));
 
-// Serve the built, minified tracking script. STRATUS_JS is generated at build
+// Serve the built, minified tracking script. SKOPIA_JS is generated at build
 // time by `npm run build:script` (esbuild → scripts/build-embed.mjs) and
 // embedded as a string constant so the Worker has zero FS/asset deps at runtime.
 // The served bytes equal what scripts/check-script-size.mjs measures.
-app.get("/stratus.js", (c) =>
-  c.text(STRATUS_JS, 200, {
+app.get("/skopia.js", (c) =>
+  c.text(SKOPIA_JS, 200, {
     "Content-Type": "application/javascript; charset=utf-8",
     "Cache-Control": "public, max-age=3600",
   }),

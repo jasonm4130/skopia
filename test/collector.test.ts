@@ -56,7 +56,7 @@ function makeBeaconRequest(
   if (opts?.origin) headers.Origin = opts.origin;
   if (opts?.ip) headers["CF-Connecting-IP"] = opts.ip;
 
-  const req = new Request("https://stratus.test/e", {
+  const req = new Request("https://skopia.test/e", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -73,7 +73,7 @@ function makeBeaconRequest(
 // ---------------------------------------------------------------------------
 describe("handlePreflight", () => {
   it("returns 204 with CORS headers", () => {
-    const req = new Request("https://stratus.test/e", {
+    const req = new Request("https://skopia.test/e", {
       method: "OPTIONS",
       headers: { Origin: "https://example.com" },
     });
@@ -84,7 +84,7 @@ describe("handlePreflight", () => {
   });
 
   it("returns 400 when no Origin header", () => {
-    const req = new Request("https://stratus.test/e", { method: "OPTIONS" });
+    const req = new Request("https://skopia.test/e", { method: "OPTIONS" });
     const res = handlePreflight(req, env);
     expect(res.status).toBe(400);
   });
@@ -95,7 +95,7 @@ describe("handlePreflight", () => {
 // ---------------------------------------------------------------------------
 describe("handleCollect — validation", () => {
   it("rejects non-POST with 405", async () => {
-    const req = new Request("https://stratus.test/e", { method: "GET" });
+    const req = new Request("https://skopia.test/e", { method: "GET" });
     Object.defineProperty(req, "cf", { value: {}, writable: false });
     const ctx = createExecutionContext();
     const res = await handleCollect(req, env, ctx);

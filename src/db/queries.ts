@@ -1,5 +1,5 @@
 /**
- * Stratus — D1 read layer (foundation-owned signatures, FINAL).
+ * Skopia — D1 read layer (foundation-owned signatures, FINAL).
  *
  * Every read the dashboard needs, returning the view-model types from
  * shared/types.ts. Signatures are final — only bodies are implemented here.

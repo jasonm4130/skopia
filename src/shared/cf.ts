@@ -1,5 +1,5 @@
 /**
- * Stratus — server-side enrichment helpers (foundation-owned signatures, FINAL).
+ * Skopia — server-side enrichment helpers (foundation-owned signatures, FINAL).
  *
  * Everything the dashboard shows beyond what the browser sends (country, ASN,
  * device/browser/OS, bot class) is derived here from `request.cf` and the

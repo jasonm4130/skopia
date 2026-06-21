@@ -1,5 +1,5 @@
 /**
- * Stratus — rollup cron (WAE -> D1 exact aggregates).
+ * Skopia — rollup cron (WAE -> D1 exact aggregates).
  *
  * Runs on the cron trigger (spec §5.1): query WAE with sampling-correct SQL,
  * GROUP BY each dimension, upsert exact aggregates into `rollup_daily`, set the
@@ -301,7 +301,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
   }
 
   // WAE dataset name must match the `dataset` field in wrangler.jsonc
-  const dataset = "stratus_events";
+  const dataset = "skopia_events";
 
   // 3. For each site × dimension × day, query WAE and upsert into D1
   const upsertStmt = env.DB.prepare(`
