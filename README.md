@@ -82,6 +82,24 @@ UI:
 - Drop the tracking snippet on your site — see the [install guide](docs/install.md).
   **First pageview appears within minutes.**
 
+### Custom domain (optional)
+
+By default your deploy is reachable at `https://skopia.<your-subdomain>.workers.dev`. To
+serve it on your own domain, add a **Custom Domain** to the Worker — Cloudflare provisions
+the DNS record and TLS certificate automatically. The domain must be in the same Cloudflare
+account.
+
+- **Dashboard:** Workers & Pages → your `skopia` Worker → **Settings → Domains & Routes →
+  Add → Custom Domain**, then enter your domain (apex or subdomain).
+- **Config:** or add a route to your own `wrangler.jsonc` and redeploy:
+
+  ```jsonc
+  "routes": [{ "pattern": "analytics.example.com", "custom_domain": true }]
+  ```
+
+Keep your own domain out of the upstream `wrangler.jsonc` if you plan to send PRs — the
+committed config stays domain-agnostic so the one-click deploy works for everyone.
+
 ### Local development
 
 This project uses [pnpm](https://pnpm.io). Copy `.dev.vars.example` to `.dev.vars`
