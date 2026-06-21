@@ -13,7 +13,7 @@ import type { Env } from "./types";
 /** Thrown by {@link requireSecrets} listing every required secret that is unset. */
 export class SecretsMissingError extends Error {
   constructor(public missing: string[]) {
-    super("Missing required secrets: " + missing.join(", "));
+    super(`Missing required secrets: ${missing.join(", ")}`);
     this.name = "SecretsMissingError";
   }
 }

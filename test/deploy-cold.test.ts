@@ -20,15 +20,13 @@
  * bootstraps the schema automatically and returns 200 with the setup form.
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Env } from "../src/shared/types";
-
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 // ---------------------------------------------------------------------------
 // Mock src/db/queries so this test does not depend on real D1 query results
 // for the login path, only for schema bootstrap.
 // ---------------------------------------------------------------------------
-import type { UserRow } from "../src/shared/types";
+import type { Env, UserRow } from "../src/shared/types";
 
 const MOCK_OWNER: UserRow = {
   id: 1,
@@ -60,8 +58,8 @@ vi.mock("../src/db/queries", () => ({
 }));
 
 import * as queries from "../src/db/queries";
-import { ensureSchema } from "../src/shared/schema";
 import worker from "../src/index";
+import { ensureSchema } from "../src/shared/schema";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,10 +176,7 @@ describe("cold-account: /setup after schema bootstrap", () => {
     // The dashboard middleware calls ensureSchema automatically.
     vi.mocked(queries.getOwner).mockResolvedValue(null);
 
-    const res = await workerFetch(
-      new Request("https://stratus.test/setup"),
-      env as unknown as Env,
-    );
+    const res = await workerFetch(new Request("https://stratus.test/setup"), env as unknown as Env);
     expect(res.status).toBe(200);
     const text = await res.text();
     // The setup form must be present
@@ -191,10 +186,7 @@ describe("cold-account: /setup after schema bootstrap", () => {
   it("GET /setup redirects to /login when an owner already exists", async () => {
     vi.mocked(queries.getOwner).mockResolvedValue(MOCK_OWNER);
 
-    const res = await workerFetch(
-      new Request("https://stratus.test/setup"),
-      env as unknown as Env,
-    );
+    const res = await workerFetch(new Request("https://stratus.test/setup"), env as unknown as Env);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/login");
   });

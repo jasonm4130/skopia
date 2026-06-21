@@ -10,7 +10,7 @@
  * deliberate PR). Run: `npm run fetch-vendor`.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -111,8 +111,8 @@ async function main() {
     written.push(`vendor/jsvectormap@1.6.0/${name}`);
   }
 
-  console.log("fetch-vendor: wrote " + written.length + " files:");
-  for (const f of written) console.log("  public/" + f);
+  console.log(`fetch-vendor: wrote ${written.length} files:`);
+  for (const f of written) console.log(`  public/${f}`);
 }
 
 main().catch((err) => {
@@ -126,9 +126,7 @@ main().catch((err) => {
   } catch {
     /* ignore */
   }
-  console.error("fetch-vendor: FAILED to download assets — " + err.message);
-  console.error(
-    "fetch-vendor: assets MUST be fetched via `npm run fetch-vendor` before deploy.",
-  );
+  console.error(`fetch-vendor: FAILED to download assets — ${err.message}`);
+  console.error("fetch-vendor: assets MUST be fetched via `npm run fetch-vendor` before deploy.");
   process.exitCode = 1;
 });

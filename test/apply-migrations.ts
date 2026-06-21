@@ -5,7 +5,7 @@
 // is `applyD1Migrations`, fed by `readD1Migrations` (run in Node at config time
 // in vitest.config.ts and passed through as the serialized TEST_MIGRATIONS
 // binding). Call this in each suite's `beforeAll` before seeding.
-import { env, applyD1Migrations, type D1Migration } from "cloudflare:test";
+import { applyD1Migrations, type D1Migration, env } from "cloudflare:test";
 
 let applied: Promise<void> | undefined;
 

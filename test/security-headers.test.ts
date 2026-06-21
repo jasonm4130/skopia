@@ -10,9 +10,9 @@
  * - The nonce is accessible inside route handlers via c.get("nonce")
  */
 
-import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
-import { securityHeaders, type AppEnv } from "../src/shared/security-headers";
+import { describe, expect, it } from "vitest";
+import { type AppEnv, securityHeaders } from "../src/shared/security-headers";
 
 function buildApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -24,10 +24,7 @@ function buildApp(): Hono<AppEnv> {
   return app;
 }
 
-async function fetchApp(
-  app: Hono<AppEnv>,
-  path = "/ping",
-): Promise<Response> {
+async function fetchApp(app: Hono<AppEnv>, path = "/ping"): Promise<Response> {
   return app.fetch(new Request(`https://test.local${path}`));
 }
 
@@ -70,7 +67,7 @@ describe("securityHeaders middleware", () => {
 
     expect(nonceMatch1).not.toBeNull();
     expect(nonceMatch2).not.toBeNull();
-    expect(nonceMatch1![1]).not.toBe(nonceMatch2![1]);
+    expect(nonceMatch1?.[1]).not.toBe(nonceMatch2?.[1]);
   });
 
   it("nonce is accessible inside the route handler via c.get('nonce')", async () => {

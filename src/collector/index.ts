@@ -6,11 +6,18 @@
  * identity -> `WAE.writeDataPoint` -> bump SiteLive DO via waitUntil -> 204.
  */
 
+import {
+  bucketScreenWidth,
+  enrichFromCf,
+  isBot,
+  parseReferrerHost,
+  parseUserAgent,
+  parseUtm,
+} from "../shared/cf";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
 import type { Beacon, Env, WaeEvent } from "../shared/types";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../shared/types";
-import { enrichFromCf, isBot, parseReferrerHost, parseUserAgent, parseUtm, bucketScreenWidth } from "../shared/cf";
-import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
-import { requireSecrets, SecretsMissingError } from "../shared/config";
 
 // ---------------------------------------------------------------------------
 // CORS helpers
@@ -29,13 +36,8 @@ const CORS_HEADERS_BASE = {
  * existence check) into a single SELECT. Returns null when the site does not
  * exist, [] when it exists but has no/empty allowlist, or the list of origins.
  */
-async function getSiteAllowlist(
-  env: Env,
-  siteId: string,
-): Promise<string[] | null> {
-  const row = await env.DB.prepare(
-    "SELECT origin_allowlist FROM sites WHERE id = ?",
-  )
+async function getSiteAllowlist(env: Env, siteId: string): Promise<string[] | null> {
+  const row = await env.DB.prepare("SELECT origin_allowlist FROM sites WHERE id = ?")
     .bind(siteId)
     .first<{ origin_allowlist: string | null }>();
 
@@ -185,9 +187,7 @@ export async function handleCollect(
 
   // ---------- 9. Cookieless identity ----------
   const ip =
-    request.headers.get("CF-Connecting-IP") ??
-    request.headers.get("X-Forwarded-For") ??
-    "0.0.0.0";
+    request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "0.0.0.0";
   const today = utcDay(new Date());
   const salt = await getDailySalt(env.SALT, today);
   const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
@@ -237,14 +237,16 @@ export async function handleCollect(
   const doId = env.SITE_LIVE.idFromName(siteId);
   const doStub = env.SITE_LIVE.get(doId);
   ctx.waitUntil(
-    doStub.fetch(
-      new Request("https://do-internal/hit", {
-        method: "POST",
-        body: JSON.stringify({ vid, path: beacon.p }),
+    doStub
+      .fetch(
+        new Request("https://do-internal/hit", {
+          method: "POST",
+          body: JSON.stringify({ vid, path: beacon.p }),
+        }),
+      )
+      .catch(() => {
+        // DO is best-effort; don't let failures kill the beacon response
       }),
-    ).catch(() => {
-      // DO is best-effort; don't let failures kill the beacon response
-    }),
   );
 
   // ---------- 14. Respond 204 ----------

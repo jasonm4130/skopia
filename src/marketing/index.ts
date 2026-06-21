@@ -9,8 +9,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env } from "../shared/types";
-import { type AppEnv } from "../shared/security-headers";
+import type { AppEnv } from "../shared/security-headers";
 
 export const marketing = new Hono<AppEnv>();
 

@@ -17,23 +17,23 @@
  * Never registers a bare "/" route — marketing pillar owns that.
  */
 
-import { Hono } from "hono";
 import type { Context, Next } from "hono";
-import type { Env, BreakdownRow, DateRange, TimeSeriesPoint, StatCards, SiteRow } from "../shared/types";
-import type { AppEnv } from "../shared/security-headers";
-import { requireSecrets, SecretsMissingError } from "../shared/config";
-import { ensureSchema } from "../shared/schema";
+import { Hono } from "hono";
 import {
   getOwner,
-  listSites,
   getSite,
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
+  getTopCountries,
   getTopPages,
   getTopSources,
-  getTopCountries,
+  listSites,
 } from "../db/queries";
+import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { ensureSchema } from "../shared/schema";
+import type { AppEnv } from "../shared/security-headers";
+import type { BreakdownRow, DateRange, SiteRow, StatCards, TimeSeriesPoint } from "../shared/types";
 
 export { SiteLive } from "./site-live";
 
@@ -104,7 +104,7 @@ async function verifyCookie(value: string, secret: string): Promise<number | nul
   const expiryStr = payload.slice(pipeIdx + 1);
   const userId = parseInt(userIdStr, 10);
   const expiry = parseInt(expiryStr, 10);
-  if (isNaN(userId) || isNaN(expiry)) return null;
+  if (Number.isNaN(userId) || Number.isNaN(expiry)) return null;
   if (Date.now() > expiry) return null;
 
   const key = await getHmacKey(secret);
@@ -124,7 +124,9 @@ function parseCookies(header: string | null): Record<string, string> {
   return Object.fromEntries(
     header.split(";").map((c) => {
       const eq = c.indexOf("=");
-      return eq === -1 ? [c.trim(), ""] : [c.slice(0, eq).trim(), decodeURIComponent(c.slice(eq + 1).trim())];
+      return eq === -1
+        ? [c.trim(), ""]
+        : [c.slice(0, eq).trim(), decodeURIComponent(c.slice(eq + 1).trim())];
     }),
   );
 }
@@ -221,23 +223,20 @@ function parseRange(param: string | null | undefined): DateRange & { label: stri
 // ---------------------------------------------------------------------------
 
 function fmtNum(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
   return String(n);
 }
 
 function fmtPct(r: number): string {
-  return Math.round(r * 100) + "%";
+  return `${Math.round(r * 100)}%`;
 }
 
 // ---------------------------------------------------------------------------
 // Auth middleware
 // ---------------------------------------------------------------------------
 
-async function requireAuth(
-  c: Context<DashEnv>,
-  next: Next,
-): Promise<Response | void> {
+async function requireAuth(c: Context<DashEnv>, next: Next): Promise<Response | void> {
   // Fail closed: on a cold deploy AUTH_COOKIE_SECRET may be unset. Reading a
   // stale session cookie would pass undefined/"" into the HMAC import and throw
   // an unhandled 500. Guard before touching the cookie and surface a clear
@@ -476,7 +475,10 @@ function timeSeriesChartHtml(
   );
 
   // Compute SVG paths (server-side for SSR, client can update metric toggle)
-  const VW = 1000, VH = 260, padT = 18, padB = 30;
+  const VW = 1000,
+    VH = 260,
+    padT = 18,
+    padB = 30;
   const plotH = VH - padT - padB;
 
   function computePaths(arr: number[]): { linePath: string; areaPath: string } {
@@ -486,9 +488,8 @@ function timeSeriesChartHtml(
     const X = (i: number) => (n > 1 ? (i / (n - 1)) * VW : 0);
     const Y = (val: number) => padT + (1 - (val - lo) / (hi - lo)) * plotH;
     const pts = arr.map((val, i) => ({ x: X(i), y: Y(val) }));
-    const linePath = "M" + pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L");
-    const areaPath =
-      linePath + ` L${VW},${VH - padB} L0,${VH - padB} Z`;
+    const linePath = `M${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L")}`;
+    const areaPath = `${linePath} L${VW},${VH - padB} L0,${VH - padB} Z`;
     return { linePath, areaPath };
   }
 
@@ -496,9 +497,16 @@ function timeSeriesChartHtml(
   const { linePath, areaPath } = computePaths(visitorsArr);
 
   // Axis labels: up to 5 evenly spaced day labels
-  const axisIndices = series.length <= 5
-    ? series.map((_, i) => i)
-    : [0, Math.floor(series.length / 4), Math.floor(series.length / 2), Math.floor((3 * series.length) / 4), series.length - 1];
+  const axisIndices =
+    series.length <= 5
+      ? series.map((_, i) => i)
+      : [
+          0,
+          Math.floor(series.length / 4),
+          Math.floor(series.length / 2),
+          Math.floor((3 * series.length) / 4),
+          series.length - 1,
+        ];
   const axisLabels = axisIndices
     .map((i) => `<span>${esc(series[i]?.day.slice(5) ?? "")}</span>`)
     .join("");
@@ -652,7 +660,12 @@ function breakdownTable(
       const cells = columns
         .map((c) => {
           const raw = r[c.key];
-          const val = c.key === "share" ? fmtPct(r.share) : c.key === "pageviews" || c.key === "visitors" ? fmtNum(raw as number) : esc(String(raw));
+          const val =
+            c.key === "share"
+              ? fmtPct(r.share)
+              : c.key === "pageviews" || c.key === "visitors"
+                ? fmtNum(raw as number)
+                : esc(String(raw));
           const mono = c.mono ? "font-family:'JetBrains Mono',monospace;" : "";
           return `<span style="${mono}flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};color:${c.key === "label" ? "#cfd4e0" : c.key === "visitors" ? "#fff" : "#9aa1b2"};">${val}</span>`;
         })
@@ -735,7 +748,11 @@ function loginPage(nonce: string, error?: string): string {
  * secret is unset, instead of signing a cookie with `undefined`.
  */
 function notConfiguredPage(nonce: string, missing: string[]): string {
-  const names = missing.map((m) => `<code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc(m)}</code>`).join(", ");
+  const names = missing
+    .map(
+      (m) => `<code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc(m)}</code>`,
+    )
+    .join(", ");
   return htmlDoc(
     "Not configured",
     "",
@@ -923,10 +940,7 @@ dashboard.post("/login", async (c) => {
 });
 
 dashboard.get("/logout", (c) => {
-  c.header(
-    "Set-Cookie",
-    `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
-  );
+  c.header("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
   return c.redirect("/login");
 });
 
@@ -941,7 +955,16 @@ dashboard.get("/public/:token", async (c) => {
   const range = parseRange(rangeParam);
 
   const site = await getSiteByPublicToken(c.env.DB, token);
-  if (!site) return c.html(htmlDoc("Not Found", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>", nonce), 404);
+  if (!site)
+    return c.html(
+      htmlDoc(
+        "Not Found",
+        "",
+        "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>",
+        nonce,
+      ),
+      404,
+    );
 
   const [cards, series, topPages, topSources, topCountries] = await Promise.all([
     getStatCards(c.env.DB, site.id, range),
@@ -989,7 +1012,7 @@ dashboard.get("/live", async (c) => {
   if (!siteId) return new Response("Missing site param", { status: 400 });
 
   const upgradeHeader = c.req.header("Upgrade");
-  if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
+  if (upgradeHeader?.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
 
@@ -1024,7 +1047,12 @@ dashboard.get("/app", async (c) => {
   const site = await resolveQuerySite(c.env.DB, siteParam);
   if (!site) {
     return c.html(
-      htmlDoc("No sites", "", "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>", nonce),
+      htmlDoc(
+        "No sites",
+        "",
+        "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>",
+        nonce,
+      ),
     );
   }
 
@@ -1051,12 +1079,7 @@ dashboard.get("/app", async (c) => {
   `;
 
   return c.html(
-    htmlDoc(
-      site.name,
-      "",
-      appLayout("overview", site.name, site.id, headerRight, content),
-      nonce,
-    ),
+    htmlDoc(site.name, "", appLayout("overview", site.name, site.id, headerRight, content), nonce),
   );
 });
 
@@ -1075,14 +1098,15 @@ dashboard.get("/app/pages", async (c) => {
   const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
   const headerRight = rangePicker(range.key, siteHiddenInput);
 
-  const content = breakdownTable(
-    [
-      { label: "Page", key: "label", mono: true },
-      { label: "Visitors", key: "visitors" },
-      { label: "Pageviews", key: "pageviews" },
-    ],
-    rows,
-  ) + liveScript(site.id, nonce);
+  const content =
+    breakdownTable(
+      [
+        { label: "Page", key: "label", mono: true },
+        { label: "Visitors", key: "visitors" },
+        { label: "Pageviews", key: "pageviews" },
+      ],
+      rows,
+    ) + liveScript(site.id, nonce);
 
   return c.html(
     htmlDoc(
@@ -1109,14 +1133,15 @@ dashboard.get("/app/sources", async (c) => {
   const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
   const headerRight = rangePicker(range.key, siteHiddenInput);
 
-  const content = breakdownTable(
-    [
-      { label: "Source", key: "label" },
-      { label: "Visitors", key: "visitors" },
-      { label: "Share", key: "share" },
-    ],
-    rows,
-  ) + liveScript(site.id, nonce);
+  const content =
+    breakdownTable(
+      [
+        { label: "Source", key: "label" },
+        { label: "Visitors", key: "visitors" },
+        { label: "Share", key: "share" },
+      ],
+      rows,
+    ) + liveScript(site.id, nonce);
 
   return c.html(
     htmlDoc(
@@ -1158,9 +1183,7 @@ dashboard.get("/app/geography", async (c) => {
     .join("\n");
 
   // Build jsVectorMap values JSON for the map
-  const mapValues = JSON.stringify(
-    Object.fromEntries(rows.map((r) => [r.label, r.visitors])),
-  );
+  const mapValues = JSON.stringify(Object.fromEntries(rows.map((r) => [r.label, r.visitors])));
 
   const content = `
     <link rel="stylesheet" href="/vendor/jsvectormap@1.6.0/jsvectormap.min.css">

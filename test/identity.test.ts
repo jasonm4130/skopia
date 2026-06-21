@@ -11,7 +11,7 @@
  */
 
 import { env } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { deriveVid, getDailySalt, rotateDailySalt, utcDay } from "../src/shared/identity";
 
 describe("utcDay", () => {
@@ -73,7 +73,6 @@ describe("deriveVid", () => {
 });
 
 describe("getDailySalt", () => {
-
   it("creates a random salt on first access", async () => {
     const salt = await getDailySalt(env.SALT, "2026-06-21");
     expect(typeof salt).toBe("string");

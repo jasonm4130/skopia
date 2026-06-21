@@ -15,17 +15,13 @@
  *   - escHtml escapes single quotes
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
 import worker from "../../src/index";
 
 async function fetchRoot(): Promise<{ res: Response; text: string }> {
   const ctx = createExecutionContext();
-  const res = await worker.fetch(
-    new Request("https://stratus.test/"),
-    env,
-    ctx,
-  );
+  const res = await worker.fetch(new Request("https://stratus.test/"), env, ctx);
   await waitOnExecutionContext(ctx);
   const text = await res.text();
   return { res, text };
@@ -241,6 +237,6 @@ describe("marketing landing page", () => {
     const scriptMatch = text.match(/<script nonce="([0-9a-f]+)">/);
     expect(styleMatch).not.toBeNull();
     expect(scriptMatch).not.toBeNull();
-    expect(styleMatch![1]).toBe(scriptMatch![1]);
+    expect(styleMatch?.[1]).toBe(scriptMatch?.[1]);
   });
 });

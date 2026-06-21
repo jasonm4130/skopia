@@ -3,7 +3,7 @@
 // Task 3); fonts + jsVectorMap are vendored under public/. Scans src/ ONLY —
 // vendored files under public/ are the allowed self-hosted copies.
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +32,7 @@ for (const file of walk(SRC)) {
 
 if (hits.length) {
   console.error("check-no-external: FAIL — third-party host(s) referenced in src/:");
-  for (const hit of hits) console.error("  " + hit);
+  for (const hit of hits) console.error(`  ${hit}`);
   process.exit(1);
 }
 console.log("no-external: OK");

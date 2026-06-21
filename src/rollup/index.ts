@@ -7,9 +7,9 @@
  * pass after UTC midnight.
  */
 
-import type { Env, RollupDimension } from "../shared/types";
-import { utcDay, rotateDailySalt } from "../shared/identity";
 import { requireSecrets, SecretsMissingError } from "../shared/config";
+import { rotateDailySalt, utcDay } from "../shared/identity";
+import type { Env, RollupDimension } from "../shared/types";
 
 // ---------------------------------------------------------------------------
 // WAE SQL HTTP API types
@@ -104,11 +104,7 @@ function nextUtcDay(day: string): string {
 const WAE_SQL_ENDPOINT = (accountId: string) =>
   `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`;
 
-async function queryWae(
-  sql: string,
-  env: Env,
-  fetcher: typeof fetch,
-): Promise<WaeSqlResponse> {
+async function queryWae(sql: string, env: Env, fetcher: typeof fetch): Promise<WaeSqlResponse> {
   // WAE SQL API: POST the raw SQL as the body (plain text), not JSON.
   // See: developers.cloudflare.com/analytics/analytics-engine/sql-api/
   const res = await fetcher(WAE_SQL_ENDPOINT(env.CF_ACCOUNT_ID), {
@@ -258,7 +254,7 @@ function buildVisitorsSql(
 function detectSampled(rows: WaeSqlRow[]): boolean {
   for (const row of rows) {
     const avgInterval = Number(row.avg_interval);
-    if (!isNaN(avgInterval) && avgInterval > 1.0) return true;
+    if (!Number.isNaN(avgInterval) && avgInterval > 1.0) return true;
   }
   return false;
 }
@@ -280,7 +276,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
     requireSecrets(env, ["CF_ACCOUNT_ID", "WAE_API_TOKEN"]);
   } catch (err) {
     if (err instanceof SecretsMissingError) {
-      console.error("rollup skipped — " + err.message);
+      console.error(`rollup skipped — ${err.message}`);
       return;
     }
     throw err;

@@ -8,13 +8,13 @@
  */
 
 import { Hono } from "hono";
-import type { Env } from "./shared/types";
-import { securityHeaders, type AppEnv } from "./shared/security-headers";
 import { handleCollect, handlePreflight } from "./collector";
-import { handleScheduled } from "./rollup";
 import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
+import { handleScheduled } from "./rollup";
+import { type AppEnv, securityHeaders } from "./shared/security-headers";
 import { STRATUS_JS } from "./shared/stratus-embed";
+import type { Env } from "./shared/types";
 
 // Re-export the Durable Object class so the wrangler migration (new_sqlite_classes:
 // ["SiteLive"]) and the SITE_LIVE binding resolve against this entry point.
@@ -33,9 +33,7 @@ app.get("/health", (c) => c.text("ok"));
 // ExecutionContext; at runtime it IS the Workers one, so we widen at this seam
 // to keep the shared handler signatures on the canonical workers-types type.
 app.options("/e", (c) => handlePreflight(c.req.raw, c.env));
-app.post("/e", (c) =>
-  handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext),
-);
+app.post("/e", (c) => handleCollect(c.req.raw, c.env, c.executionCtx as ExecutionContext));
 
 // Serve the built, minified tracking script. STRATUS_JS is generated at build
 // time by `npm run build:script` (esbuild → scripts/build-embed.mjs) and

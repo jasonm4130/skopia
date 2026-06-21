@@ -10,15 +10,15 @@
  * - enrichFromCf: safe defaults for missing fields
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  parseUserAgent,
+  bucketScreenWidth,
+  type CfEnrichment,
+  enrichFromCf,
   isBot,
   parseReferrerHost,
+  parseUserAgent,
   parseUtm,
-  bucketScreenWidth,
-  enrichFromCf,
-  type CfEnrichment,
 } from "../src/shared/cf";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +26,8 @@ import {
 // ---------------------------------------------------------------------------
 describe("parseUserAgent", () => {
   it("identifies Chrome on Windows as desktop", () => {
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
     const r = parseUserAgent(ua);
     expect(r.browser).toBe("Chrome");
     expect(r.os).toBe("Windows");
@@ -34,7 +35,8 @@ describe("parseUserAgent", () => {
   });
 
   it("identifies Safari on macOS as desktop", () => {
-    const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
+    const ua =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
     const r = parseUserAgent(ua);
     expect(r.browser).toBe("Safari");
     expect(r.os).toBe("macOS");
@@ -50,21 +52,24 @@ describe("parseUserAgent", () => {
   });
 
   it("identifies Chrome on Android as mobile", () => {
-    const ua = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36";
+    const ua =
+      "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36";
     const r = parseUserAgent(ua);
     expect(r.os).toBe("Android");
     expect(r.deviceClass).toBe("mobile");
   });
 
   it("identifies Safari on iPhone as mobile", () => {
-    const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+    const ua =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
     const r = parseUserAgent(ua);
     expect(r.os).toBe("iOS");
     expect(r.deviceClass).toBe("mobile");
   });
 
   it("identifies Edge browser", () => {
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0";
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0";
     const r = parseUserAgent(ua);
     expect(r.browser).toBe("Edge");
   });
@@ -77,7 +82,8 @@ describe("parseUserAgent", () => {
   });
 
   it("identifies iPad as tablet", () => {
-    const ua = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+    const ua =
+      "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
     const r = parseUserAgent(ua);
     expect(r.deviceClass).toBe("tablet");
   });
@@ -175,12 +181,14 @@ describe("isBot", () => {
   });
 
   it("passes a real browser UA with Accept-Language", () => {
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36";
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36";
     expect(isBot(makeRequest(ua), ua, makeCf())).toBe(false);
   });
 
   it("passes mobile browser UA", () => {
-    const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1";
+    const ua =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1";
     expect(isBot(makeRequest(ua), ua, makeCf())).toBe(false);
   });
 });

@@ -8,7 +8,7 @@
  * - SecretsMissingError lists all missing names (not just the first)
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { requireSecrets, SecretsMissingError } from "../src/shared/config";
 import type { Env } from "../src/shared/types";
 

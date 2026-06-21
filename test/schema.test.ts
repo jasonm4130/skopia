@@ -12,7 +12,7 @@
  */
 
 import { env } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ensureSchema } from "../src/shared/schema";
 
 describe("ensureSchema", () => {

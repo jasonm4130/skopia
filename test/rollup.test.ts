@@ -14,7 +14,7 @@
  */
 
 import { env } from "cloudflare:test";
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { runRollups } from "../src/rollup/index";
 import { applyMigrations } from "./apply-migrations";
 
@@ -22,9 +22,7 @@ beforeAll(async () => {
   // Apply the real migrations/0001_init.sql (creates all tables + seeds the
   // 'default' site).
   await applyMigrations();
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-  )
+  await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
     .bind("rollup-site", "Rollup Test Site", "rollup.example.com")
     .run();
 });
@@ -117,9 +115,7 @@ describe("runRollups", () => {
   it("sets sampled=0 when avg_interval=1.0 (unsampled data — fix #7)", async () => {
     const day = today();
 
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("low-vol-site", "Low Vol", "lowvol.example.com")
       .run();
 
@@ -143,9 +139,7 @@ describe("runRollups", () => {
   it("sets sampled=1 when avg_interval > 1.0 (sampled data — fix #7)", async () => {
     const day = today();
 
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("high-vol-site", "High Vol", "highvol.example.com")
       .run();
 
@@ -173,9 +167,7 @@ describe("runRollups", () => {
   it("upsert is idempotent: running rollup twice gives the same row count", async () => {
     const day = today();
 
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("idem-site", "Idempotent Site", "idem.example.com")
       .run();
 
@@ -198,9 +190,7 @@ describe("runRollups", () => {
   });
 
   it("gracefully handles WAE returning an empty result set", async () => {
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("empty-wae-site", "Empty WAE", "empty.example.com")
       .run();
 
@@ -209,14 +199,12 @@ describe("runRollups", () => {
   });
 
   it("skips dimensions when WAE returns an HTTP error (non-fatal)", async () => {
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("error-wae-site", "Error WAE", "error.example.com")
       .run();
 
-    const fetcher = vi.fn(async () =>
-      new Response("rate limited", { status: 429 }),
+    const fetcher = vi.fn(
+      async () => new Response("rate limited", { status: 429 }),
     ) as unknown as typeof fetch;
 
     await expect(runRollups(env, fetcher)).resolves.not.toThrow();
@@ -225,9 +213,7 @@ describe("runRollups", () => {
   it("two-pass: sampled flag on total row reflects sampling found in per-dimension queries (fix #8)", async () => {
     const day = today();
 
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
-    )
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
       .bind("twopass-site", "Two Pass Site", "twopass.example.com")
       .run();
 
