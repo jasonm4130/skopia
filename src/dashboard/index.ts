@@ -93,18 +93,14 @@ async function verifyCookie(value: string, secret: string): Promise<number | nul
 
   const key = await getHmacKey(secret);
   const enc = new TextEncoder();
-  const expectedSig = await crypto.subtle.sign("HMAC", key, enc.encode(payload));
-  const expectedHex = Array.from(new Uint8Array(expectedSig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 
-  // Constant-time comparison
-  if (sigHex.length !== expectedHex.length) return null;
-  let diff = 0;
-  for (let i = 0; i < sigHex.length; i++) {
-    diff |= sigHex.charCodeAt(i) ^ expectedHex.charCodeAt(i);
-  }
-  return diff === 0 ? userId : null;
+  // Decode the submitted signature hex to bytes.
+  const sigBytes = new Uint8Array(sigHex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
+  if (sigBytes.length === 0) return null;
+
+  // Platform constant-time HMAC verify (avoids manual hex comparison).
+  const valid = await crypto.subtle.verify("HMAC", key, sigBytes, enc.encode(payload));
+  return valid ? userId : null;
 }
 
 function parseCookies(header: string | null): Record<string, string> {
@@ -128,7 +124,7 @@ async function hashPassword(password: string): Promise<string> {
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
     keyMaterial,
     256,
   );
@@ -151,7 +147,7 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
     keyMaterial,
     256,
   );
@@ -257,7 +253,7 @@ const BASE_CSS = `
   ::-webkit-scrollbar{width:10px;height:10px;}
   ::-webkit-scrollbar-thumb{background:#232838;border-radius:6px;}
   ::-webkit-scrollbar-track{background:transparent;}
-  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @keyframes stratusPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 `.trim();
 
 function htmlDoc(title: string, head: string, body: string): string {
@@ -342,7 +338,7 @@ function appLayout(
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:pulse 1.6s infinite;"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:stratusPulse 1.6s infinite;"></span>
         <span id="live-count">—</span> online now
       </div>
       ${headerRight}
@@ -874,8 +870,12 @@ dashboard.get("/public/:token", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Route: /live — WebSocket proxy to SiteLive DO
+// Route: /live — WebSocket proxy to SiteLive DO (auth-gated)
 // ---------------------------------------------------------------------------
+
+// Middleware for /live — same auth gate as /app routes.
+// WebSocket upgrades are plain GETs so the middleware runs before the handshake.
+dashboard.use("/live", requireAuth);
 
 dashboard.get("/live", async (c) => {
   const siteId = c.req.query("site") ?? "";
@@ -972,7 +972,7 @@ dashboard.get("/app/pages", async (c) => {
       { label: "Pageviews", key: "pageviews" },
     ],
     rows,
-  );
+  ) + liveScript(site.id);
 
   return c.html(
     htmlDoc(
@@ -1004,7 +1004,7 @@ dashboard.get("/app/sources", async (c) => {
       { label: "Share", key: "share" },
     ],
     rows,
-  );
+  ) + liveScript(site.id);
 
   return c.html(
     htmlDoc(

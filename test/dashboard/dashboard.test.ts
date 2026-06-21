@@ -12,6 +12,8 @@
  *   - /public/:token returns 404 for unknown token
  *   - /public/:token returns 200 with HTML overview sections for a known token
  *   - /logout clears the session cookie
+ *   - /live unauthenticated is rejected (redirected to /login)
+ *   - /live authenticated but missing Upgrade returns 426
  *
  * src/db/queries.ts is mocked so these tests do not depend on the backbone
  * agent's implementation.
@@ -324,17 +326,48 @@ describe("sampled data badge", () => {
 });
 
 // ---------------------------------------------------------------------------
-// /live — WebSocket
+// /live — WebSocket (auth-gated)
 // ---------------------------------------------------------------------------
 
 describe("/live", () => {
-  it("returns 400 when site param is missing", async () => {
-    const { res } = await fetch_(req("/live"));
-    expect(res.status).toBe(400);
+  it("redirects unauthenticated requests to /login", async () => {
+    // No cookie → requireAuth redirects before the WS upgrade check.
+    const { res } = await fetch_(req("/live?site=site-001"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
   });
 
-  it("returns 426 when Upgrade header is missing", async () => {
-    const { res } = await fetch_(req("/live?site=site-001"));
+  it("redirects unauthenticated /live (no site param) to /login", async () => {
+    const { res } = await fetch_(req("/live"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("returns 426 when authenticated but Upgrade header is missing", async () => {
+    // Provide a valid signed cookie so requireAuth passes.
+    // We sign a synthetic cookie using the test env's AUTH_COOKIE_SECRET.
+    const secret = (env as { AUTH_COOKIE_SECRET?: string }).AUTH_COOKIE_SECRET ?? "test-secret";
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      enc.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    const payload = `1|${expiry}`;
+    const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payload));
+    const sigHex = Array.from(new Uint8Array(sigBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const cookieVal = encodeURIComponent(`${payload}.${sigHex}`);
+
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: { Cookie: `stratus_session=${cookieVal}` },
+      }),
+    );
     expect(res.status).toBe(426);
   });
 });

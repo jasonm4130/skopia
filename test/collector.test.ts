@@ -170,6 +170,32 @@ describe("handleCollect — CORS origin allowlist", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rejects headerless POST to site with a non-empty allowlist (fix #2)", async () => {
+    // 'test-site' has origin_allowlist="https://example.com", so a request with
+    // no Origin header must be rejected — it would otherwise bypass the allowlist.
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      // No origin header — omit the key entirely
+      { ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts headerless POST to open site (empty allowlist)", async () => {
+    // 'open-site' has an empty allowlist — headerless requests are fine.
+    const req = makeBeaconRequest(
+      { t: "pv", s: "open-site", p: "/" },
+      { ip: "1.2.3.4" },
+      // No origin header
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(204);
+  });
+
   it("accepts request to open site from any origin", async () => {
     const req = makeBeaconRequest(
       { t: "pv", s: "open-site", p: "/" },

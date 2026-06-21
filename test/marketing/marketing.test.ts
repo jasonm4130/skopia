@@ -9,6 +9,10 @@
  *   - pricing section with the correct message
  *   - FAQ markup present
  *   - cost calculator slider + live update elements present
+ *   - correct cost model per spec §9 (free ≤3M, $5 at 10M, ~$55 at 100M)
+ *   - no fabricated social proof (no "4.2k" stars, no "3,400+")
+ *   - first FAQ item expanded by default (faqOpen=0)
+ *   - escHtml escapes single quotes
  */
 
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
@@ -79,12 +83,39 @@ describe("marketing landing page", () => {
     expect(text).toContain('id="calc-note"');
   });
 
-  it("contains the inline client script with the calculator stops", async () => {
+  it("contains the inline client script with the 100M stop", async () => {
     const { text } = await fetchRoot();
-    // The script encodes the stops array
-    expect(text).toContain("10000000");
-    // And the cost formula boundary
-    expect(text).toContain("1000000");
+    expect(text).toContain("100000000");
+  });
+
+  it("cost formula uses the spec §9 free ceiling of 3M events/mo", async () => {
+    const { text } = await fetchRoot();
+    // The 3M free ceiling must appear in the stops array
+    expect(text).toContain("3000000");
+  });
+
+  it("cost formula: free tier threshold is 3M (not 1M)", async () => {
+    const { text } = await fetchRoot();
+    // The old incorrect threshold was `pv<=1000000` → 0.
+    // The correct one is `pv<=3000000` → 0.
+    // Note: match the closing paren so `pv<=1000000` isn't matched as a
+    // prefix of the legitimate `pv<=10000000)` (the $5 paid-tier band).
+    expect(text).toContain("pv<=3000000)");
+    expect(text).not.toContain("pv<=1000000)");
+  });
+
+  it("cost formula: $5 paid tier covers up to 10M events/mo", async () => {
+    const { text } = await fetchRoot();
+    // The $5 flat-rate band must reference pv<=10000000
+    expect(text).toContain("pv<=10000000");
+  });
+
+  it("cost formula: overage rate is $0.55/M above 10M (WAE $0.25 + Workers $0.30)", async () => {
+    const { text } = await fetchRoot();
+    // The per-million overage multiplier must be 0.55
+    expect(text).toContain("0.55");
+    // The old incorrect $0.60/M rate must be gone
+    expect(text).not.toContain("0.6)");
   });
 
   it("'Deploy to Cloudflare' CTA links to /login", async () => {
@@ -101,5 +132,69 @@ describe("marketing landing page", () => {
   it("does not contain 'not implemented' (stub is replaced)", async () => {
     const { text } = await fetchRoot();
     expect(text).not.toContain("not implemented");
+  });
+
+  // Fix 4: no fabricated social proof
+  it("does NOT contain fabricated '4.2k' GitHub star count", async () => {
+    const { text } = await fetchRoot();
+    expect(text).not.toContain("4.2k");
+  });
+
+  it("does NOT contain fabricated '3,400+' user count", async () => {
+    const { text } = await fetchRoot();
+    expect(text).not.toContain("3,400+");
+  });
+
+  // Fix 3: slider tick labels match actual stop positions
+  it("slider tick labels show 10K, 3M, 100M (matching actual stop positions)", async () => {
+    const { text } = await fetchRoot();
+    // Left label = first stop (10K), center = 3M (free ceiling), right = 100M
+    expect(text).toContain("<span>10K</span><span>3M</span><span>100M</span>");
+  });
+
+  // Fix 2: corrected how-it-works and FAQ copy
+  it("how-it-works step 3 does NOT claim $5 at one million views", async () => {
+    const { text } = await fetchRoot();
+    expect(text).not.toContain("five dollars a month at a million views");
+  });
+
+  it("how-it-works step 3 references correct free ceiling (~3M) and $5 at ~10M", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toContain("~3M pageviews/mo");
+    expect(text).toContain("~$5/mo around 10M");
+  });
+
+  it("FAQ cost answer does NOT claim $5 past one million pageviews", async () => {
+    const { text } = await fetchRoot();
+    expect(text).not.toContain("around $5/mo once you pass roughly a million pageviews");
+  });
+
+  it("FAQ cost answer references correct free ceiling (~3M) and $5 plan at ~10M", async () => {
+    const { text } = await fetchRoot();
+    expect(text).toContain("3M pageviews/mo");
+    expect(text).toContain("~10M pageviews/mo");
+  });
+
+  // Fix 5: first FAQ item expanded by default
+  it("first FAQ body is display:block (expanded by default)", async () => {
+    const { text } = await fetchRoot();
+    // The first faq-body must be display:block; subsequent ones display:none
+    const firstBodyIdx = text.indexOf("faq-body");
+    expect(text.substring(firstBodyIdx, firstBodyIdx + 120)).toContain("display:block");
+  });
+
+  it("first FAQ icon has accent color (open state)", async () => {
+    const { text } = await fetchRoot();
+    const firstIconIdx = text.indexOf("faq-icon");
+    // The first faq-icon must carry the accent color, not the default muted color
+    expect(text.substring(firstIconIdx, firstIconIdx + 120)).toContain("color:#4d86ff");
+  });
+
+  // Fix 6: escHtml escapes single quotes
+  it("escHtml escapes single quotes (&#39; present in source)", async () => {
+    const { text } = await fetchRoot();
+    // The escHtml function must include the single-quote replacement;
+    // this is verified by checking the script contains the &#39; replacement call.
+    expect(text).toContain("&#39;");
   });
 });

@@ -111,6 +111,16 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
+  /** Hibernation-API error handler — close the socket to remove stale entries. */
+  override async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+    void error;
+    try {
+      ws.close();
+    } catch {
+      // already closed
+    }
+  }
+
   /** Eviction tick: drop visitors not seen in the last 5 minutes (spec §6). */
   override async alarm(): Promise<void> {
     const cutoff = Date.now() - VISITOR_TTL_MS;

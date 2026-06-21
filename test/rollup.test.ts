@@ -2,6 +2,15 @@
  * Tests for src/rollup/index.ts
  *
  * Mocks the WAE SQL fetch and asserts D1 rows written, including sampling math.
+ *
+ * The rollup now issues TWO WAE queries per dimension:
+ *   1. A pageviews query  — contains "AVG(_sample_interval)" (returns pageviews + avg_interval)
+ *   2. A visitors query   — contains "SUM(si) AS visitors" (returns visitor counts from
+ *                           a GROUP BY blob1 subquery)
+ *
+ * Fix #1: visitors != pageviews (unique visitor subquery).
+ * Fix #7: sampled detection uses AVG(_sample_interval) > 1.0, not raw_count threshold.
+ * Fix #8: anySampled is computed over ALL dimensions before writing the 'total' row.
  */
 
 import { env } from "cloudflare:test";
@@ -26,16 +35,28 @@ beforeAll(async () => {
 
 /**
  * Creates a fetch stub that returns canned WAE SQL API responses.
- * The rollup queries WAE by POSTing raw SQL (plain text body).
- * We match by looking for a substring in the SQL body.
+ *
+ * The rollup now issues two WAE queries per dimension:
+ *   - pageviews query: identified by "AVG(_sample_interval)" in the SQL body
+ *   - visitors query:  identified by "SUM(si) AS visitors" in the SQL body
+ *
+ * `pvResponses` — keyed by a substring to match in the SQL; value = pageviews response
+ *   (rows should have: pageviews, avg_interval)
+ * `visitorResponses` — keyed by same substring; value = visitors response
+ *   (rows should have: visitors, and optionally dim_value for per-dimension queries)
  */
 function makeWaeFetcher(
-  responses: Record<string, { data: object[] }>,
+  pvResponses: Record<string, { data: object[] }>,
+  visitorResponses: Record<string, { data: object[] }>,
   fallback: { data: object[] } = { data: [] },
 ): typeof fetch {
   return vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    // WAE SQL API: body is raw SQL text (not JSON)
     const sql = init?.body ? String(init.body) : "";
+
+    // Identify query type by marker strings unique to each query
+    const isVisitorsQuery = sql.includes("SUM(si) AS visitors");
+
+    const responses = isVisitorsQuery ? visitorResponses : pvResponses;
 
     for (const [key, response] of Object.entries(responses)) {
       if (sql.includes(key)) {
@@ -63,16 +84,19 @@ function today(): string {
 // ---------------------------------------------------------------------------
 
 describe("runRollups", () => {
-  it("upserts total dimension rows into rollup_daily", async () => {
+  it("upserts total dimension rows into rollup_daily with visitors != pageviews (fix #1)", async () => {
     const day = today();
 
-    const fetcher = makeWaeFetcher({
-      "rollup-site": {
-        data: [
-          { day, dim_value: "", pageviews: 42, visitors: 30, raw_count: 42 },
-        ],
-      },
-    });
+    // Pageviews query response (identified by AVG(_sample_interval) marker)
+    const pvData = [{ day, dim_value: "", pageviews: 42, avg_interval: 1.0 }];
+    // Visitors query response (identified by SUM(si) AS visitors marker)
+    // 30 unique visitors != 42 pageviews — verifies the fix
+    const visData = [{ visitors: 30 }];
+
+    const fetcher = makeWaeFetcher(
+      { "rollup-site": { data: pvData } },
+      { "rollup-site": { data: visData } },
+    );
 
     await runRollups(env, fetcher);
 
@@ -83,11 +107,14 @@ describe("runRollups", () => {
       .first<{ pageviews: number; visitors: number; sampled: number }>();
 
     expect(row).not.toBeNull();
-    expect(typeof row?.pageviews).toBe("number");
-    expect(typeof row?.visitors).toBe("number");
+    expect(row?.pageviews).toBe(42);
+    // Fix #1: visitors comes from the GROUP BY blob1 subquery, not SUM(_sample_interval)
+    expect(row?.visitors).toBe(30);
+    // Verify visitors != pageviews (the core bug)
+    expect(row?.visitors).not.toBe(row?.pageviews);
   });
 
-  it("sets sampled=0 for low-volume data (below sampling threshold)", async () => {
+  it("sets sampled=0 when avg_interval=1.0 (unsampled data — fix #7)", async () => {
     const day = today();
 
     await env.DB.prepare(
@@ -96,12 +123,11 @@ describe("runRollups", () => {
       .bind("low-vol-site", "Low Vol", "lowvol.example.com")
       .run();
 
-    // raw_count well below 100k SAMPLING_THRESHOLD
-    const fetcher = makeWaeFetcher({
-      "low-vol-site": {
-        data: [{ day, dim_value: "", pageviews: 500, visitors: 400, raw_count: 500 }],
-      },
-    });
+    // avg_interval = 1.0 → not sampled (fix #7: AVG-based detection replaces raw_count threshold)
+    const fetcher = makeWaeFetcher(
+      { "low-vol-site": { data: [{ day, dim_value: "", pageviews: 500, avg_interval: 1.0 }] } },
+      { "low-vol-site": { data: [{ visitors: 400 }] } },
+    );
 
     await runRollups(env, fetcher);
 
@@ -114,7 +140,7 @@ describe("runRollups", () => {
     expect(row?.sampled).toBe(0);
   });
 
-  it("sets sampled=1 for high-volume data (above sampling threshold)", async () => {
+  it("sets sampled=1 when avg_interval > 1.0 (sampled data — fix #7)", async () => {
     const day = today();
 
     await env.DB.prepare(
@@ -123,12 +149,15 @@ describe("runRollups", () => {
       .bind("high-vol-site", "High Vol", "highvol.example.com")
       .run();
 
-    // raw_count > 100k → sampled=true
-    const fetcher = makeWaeFetcher({
-      "high-vol-site": {
-        data: [{ day, dim_value: "", pageviews: 150000, visitors: 120000, raw_count: 150000 }],
+    // avg_interval = 5.2 → sampled (WAE set sample interval > 1)
+    const fetcher = makeWaeFetcher(
+      {
+        "high-vol-site": {
+          data: [{ day, dim_value: "", pageviews: 150000, avg_interval: 5.2 }],
+        },
       },
-    });
+      { "high-vol-site": { data: [{ visitors: 25000 }] } },
+    );
 
     await runRollups(env, fetcher);
 
@@ -150,11 +179,10 @@ describe("runRollups", () => {
       .bind("idem-site", "Idempotent Site", "idem.example.com")
       .run();
 
-    const fetcher = makeWaeFetcher({
-      "idem-site": {
-        data: [{ day, dim_value: "", pageviews: 77, visitors: 55, raw_count: 77 }],
-      },
-    });
+    const fetcher = makeWaeFetcher(
+      { "idem-site": { data: [{ day, dim_value: "", pageviews: 77, avg_interval: 1.0 }] } },
+      { "idem-site": { data: [{ visitors: 55 }] } },
+    );
 
     await runRollups(env, fetcher);
     await runRollups(env, fetcher);
@@ -176,7 +204,7 @@ describe("runRollups", () => {
       .bind("empty-wae-site", "Empty WAE", "empty.example.com")
       .run();
 
-    const fetcher = makeWaeFetcher({}, { data: [] });
+    const fetcher = makeWaeFetcher({}, {}, { data: [] });
     await expect(runRollups(env, fetcher)).resolves.not.toThrow();
   });
 
@@ -192,5 +220,58 @@ describe("runRollups", () => {
     ) as unknown as typeof fetch;
 
     await expect(runRollups(env, fetcher)).resolves.not.toThrow();
+  });
+
+  it("two-pass: sampled flag on total row reflects sampling found in per-dimension queries (fix #8)", async () => {
+    const day = today();
+
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)",
+    )
+      .bind("twopass-site", "Two Pass Site", "twopass.example.com")
+      .run();
+
+    // Total dimension: avg_interval = 1.0 (looks unsampled on its own)
+    // Per-dimension queries: avg_interval = 3.0 (reveals sampling happened)
+    // Fix #8: the 'total' row must have sampled=1 because a later dimension revealed it.
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const sql = init?.body ? String(init.body) : "";
+      const isVisitorsQuery = sql.includes("SUM(si) AS visitors");
+
+      if (isVisitorsQuery) {
+        // Visitors query: always return simple count
+        return new Response(JSON.stringify({ data: [{ visitors: 10 }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Pageviews query: total dimension has avg_interval=1.0, others have avg_interval=3.0
+      const isTotal = sql.includes("'' AS dim_value");
+      if (sql.includes("twopass-site")) {
+        const data = isTotal
+          ? [{ day, dim_value: "", pageviews: 100, avg_interval: 1.0 }]
+          : [{ day, dim_value: "example", pageviews: 50, avg_interval: 3.0 }];
+        return new Response(JSON.stringify({ data }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await runRollups(env, fetcher);
+
+    const row = await env.DB.prepare(
+      "SELECT sampled FROM rollup_daily WHERE site_id = ? AND dimension = 'total' AND day = ?",
+    )
+      .bind("twopass-site", day)
+      .first<{ sampled: number }>();
+
+    // The 'total' row must show sampled=1 because per-dimension data revealed sampling
+    expect(row?.sampled).toBe(1);
   });
 });

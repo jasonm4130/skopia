@@ -22,17 +22,28 @@ const CORS_HEADERS_BASE = {
 } as const;
 
 /**
- * Parse the per-site origin allowlist from D1. The `origin_allowlist` column is
- * a comma-separated string of allowed origins (e.g. "https://example.com").
- * Returns an empty array if the site doesn't exist or has no allowlist.
+ * Fetch the per-site origin allowlist from D1 in one query.
+ *
+ * Fix #6a (MED): merged the two former D1 lookups (origin_allowlist fetch +
+ * existence check) into a single SELECT. Returns null when the site does not
+ * exist, [] when it exists but has no/empty allowlist, or the list of origins.
  */
-async function getAllowedOrigins(env: Env, siteId: string): Promise<string[]> {
+async function getSiteAllowlist(
+  env: Env,
+  siteId: string,
+): Promise<string[] | null> {
   const row = await env.DB.prepare(
     "SELECT origin_allowlist FROM sites WHERE id = ?",
   )
     .bind(siteId)
-    .first<{ origin_allowlist: string }>();
-  if (!row || !row.origin_allowlist) return [];
+    .first<{ origin_allowlist: string | null }>();
+
+  // null row → site does not exist
+  if (row === null) return null;
+
+  // Row exists but allowlist is empty or null → open site
+  if (!row.origin_allowlist) return [];
+
   return row.origin_allowlist
     .split(",")
     .map((o) => o.trim())
@@ -127,35 +138,35 @@ export async function handleCollect(
     return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
   }
 
-  // ---------- 4. CORS: validate origin against per-site allowlist ----------
-  if (origin) {
-    const allowed = await getAllowedOrigins(env, siteId);
-    // If the site has an allowlist, the origin must be in it.
-    // If the allowlist is empty, we allow any origin (open / unconfigured site).
-    if (allowed.length > 0 && !allowed.includes(origin)) {
-      return new Response(null, { status: 403, headers: corsHeaders(origin) });
-    }
-  }
-
-  // ---------- 5. Validate site exists ----------
-  const siteExists = await env.DB.prepare("SELECT 1 FROM sites WHERE id = ?")
-    .bind(siteId)
-    .first();
-  if (!siteExists) {
-    return new Response(null, { status: 404, headers: origin ? corsHeaders(origin) : {} });
-  }
-
-  // ---------- 6. Enrich from CF ----------
+  // ---------- 4. Enrich from CF + UA (fix #6b: before D1 queries so bots cost no D1 reads) ----------
   const cf = enrichFromCf(request);
   const uaInfo = parseUserAgent(ua);
 
-  // ---------- 7. Heuristic bot drop ----------
+  // ---------- 5. Heuristic bot drop (fix #6b: moved BEFORE D1 lookups, spec §3 ordering) ----------
   if (isBot(request, ua, cf)) {
     // Silently accept (don't tell scrapers they're being dropped)
     return new Response(null, {
       status: 204,
       headers: origin ? corsHeaders(origin) : {},
     });
+  }
+
+  // ---------- 6. D1: single lookup for site existence + allowlist (fix #6a: merged queries) ----------
+  const allowlist = await getSiteAllowlist(env, siteId);
+
+  // null = site does not exist
+  if (allowlist === null) {
+    return new Response(null, { status: 404, headers: origin ? corsHeaders(origin) : {} });
+  }
+
+  // ---------- 7. CORS: validate origin against per-site allowlist ----------
+  // Fix #2 (HIGH): if the site has a non-empty allowlist, requests with NO Origin
+  // header are also rejected — a headerless POST would bypass the allowlist entirely.
+  // Only open sites (empty allowlist) accept headerless requests.
+  if (allowlist.length > 0) {
+    if (!origin || !allowlist.includes(origin)) {
+      return new Response(null, { status: 403, headers: origin ? corsHeaders(origin) : {} });
+    }
   }
 
   // ---------- 8. Cookieless identity ----------

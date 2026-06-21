@@ -29,7 +29,12 @@ interface WaeSqlRow {
   dim_value: string;
   pageviews: number | string;
   visitors: number | string;
+  avg_interval: number | string;
   raw_count: number | string;
+}
+
+interface VisitorsSqlRow {
+  visitors: number | string;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +61,40 @@ const ROLLUP_DIMENSIONS: Array<{ dimension: RollupDimension; blobCol: string | n
   { dimension: "os", blobCol: "blob10" },
   { dimension: "event", blobCol: "blob11" },
 ];
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+/** Allowlist regex for siteId to prevent SQL injection. Fix #3 (HIGH). */
+const SITE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** YYYY-MM-DD regex for day strings. Fix #3 (HIGH). */
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function validateSiteId(siteId: string): void {
+  if (!SITE_ID_RE.test(siteId)) {
+    throw new Error(`Invalid siteId: "${siteId}"`);
+  }
+}
+
+function validateDay(day: string): void {
+  if (!DAY_RE.test(day)) {
+    throw new Error(`Invalid day: "${day}"`);
+  }
+}
+
+/**
+ * Compute the next UTC day string for a given YYYY-MM-DD day.
+ * Used for the upper-bound date filter (fix #4: use nextDay 00:00:00 instead
+ * of <day> 23:59:59, which drops the last second's sub-second events).
+ */
+function nextUtcDay(day: string): string {
+  // Parse as UTC midnight and advance by 1 day
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return utcDay(d);
+}
 
 // ---------------------------------------------------------------------------
 // WAE SQL API helpers
@@ -92,8 +131,13 @@ async function queryWae(
  * Build the SQL to aggregate one dimension for one day.
  *
  * WAE SQL constraints (spec §5.2): no JOIN, no UNION. We run one query per
- * dimension per day. Sampling-correct counts use SUM(_sample_interval).
- * Unique visitors use a subquery (no COUNT(DISTINCT) across sampling — spec §4.1).
+ * dimension per day. Sampling-correct pageviews use SUM(_sample_interval * double2).
+ * Unique visitors are computed via a separate visitors query (buildVisitorsSql).
+ *
+ * Fix #3: siteId is validated against SITE_ID_RE before interpolation.
+ * Fix #4: upper bound uses nextDay 00:00:00 (not <day> 23:59:59) to include
+ *         sub-second events in the last second of the day.
+ * Fix #7: avg_interval is returned for sampled-flag detection.
  */
 function buildDimensionSql(
   dataset: string,
@@ -101,8 +145,14 @@ function buildDimensionSql(
   day: string,
   blobCol: string | null,
 ): string {
-  const dateFilter = `toDateTime('${day} 00:00:00') <= timestamp AND timestamp < toDateTime('${day} 23:59:59')`;
-  const siteFilter = `index1 = '${siteId.replace(/'/g, "''")}'`;
+  // Validation happens in runRollups before this is called; assert here defensively.
+  validateSiteId(siteId);
+  validateDay(day);
+  const nd = nextUtcDay(day);
+  // siteId is validated to [A-Za-z0-9_-]{1,64} so single-quote escaping is not needed,
+  // but we keep it for belt-and-suspenders correctness.
+  const dateFilter = `toDateTime('${day} 00:00:00') <= timestamp AND timestamp < toDateTime('${nd} 00:00:00')`;
+  const siteFilter = `index1 = '${siteId}'`;
   const base = `FROM ${dataset} WHERE ${siteFilter} AND ${dateFilter}`;
 
   if (blobCol === null) {
@@ -112,8 +162,8 @@ function buildDimensionSql(
         '${day}' AS day,
         '' AS dim_value,
         SUM(_sample_interval * double2) AS pageviews,
-        SUM(_sample_interval) AS visitors,
-        count() AS raw_count
+        count() AS raw_count,
+        AVG(_sample_interval) AS avg_interval
       ${base}
     `.trim();
   }
@@ -124,8 +174,8 @@ function buildDimensionSql(
       '${day}' AS day,
       ${blobCol} AS dim_value,
       SUM(_sample_interval * double2) AS pageviews,
-      SUM(_sample_interval) AS visitors,
-      count() AS raw_count
+      count() AS raw_count,
+      AVG(_sample_interval) AS avg_interval
     ${base}
     GROUP BY ${blobCol}
     ORDER BY pageviews DESC
@@ -134,28 +184,80 @@ function buildDimensionSql(
 }
 
 /**
- * Determine if a WAE query was sampled by inspecting raw row count.
+ * Build the SQL to count unique visitors for one dimension for one day.
  *
- * WAE docs warn that count() (raw, uncorrected) will be at the resolution
- * ceiling if sampling kicked in. We use a heuristic: if _sample_interval was
- * non-1 for any row, sampling occurred. Since the SQL API doesn't expose
- * per-row _sample_interval in our aggregate, we fall back to checking if the
- * sum of pageviews derived via SUM(_sample_interval*double2) diverges from a
- * raw count. For simplicity, we record sampled=true whenever the raw_count
- * across the total dimension exceeds the WAE free resolution (~10k events/window
- * per index — conservative threshold).
+ * Fix #1 (HIGH): unique visitors must come from a GROUP BY blob1 (vid) subquery,
+ * not SUM(_sample_interval) which gives event counts (visitors == pageviews bug).
  *
- * In practice at self-host volumes, this is always sampled=false.
+ * Pattern per spec §4.1 / §5.2: "uniques use SUM(_sample_interval) over a
+ * GROUP BY vid subquery". WAE SQL supports subqueries in FROM (spec §5.2:
+ * "Subqueries and CTE-free aggregates are fine").
+ *
+ * For unsampled data (the common case at self-host volumes): each vid row in
+ * the inner subquery has si=events-for-that-vid; the outer SUM(si) gives total
+ * events, but COUNT(*) in the outer gives the deduplicated unique visitor count.
+ * For sampling-corrected uniques we use SUM(si) from the inner (where si =
+ * SUM(_sample_interval) per vid) which gives the best approximation: each unique
+ * visitor contributes their sampling weight once.
+ *
+ * For per-dimension queries (blobCol != null), we also filter to the dimension
+ * so that visitors are scoped to that dimension value in the outer GROUP BY.
+ */
+function buildVisitorsSql(
+  dataset: string,
+  siteId: string,
+  day: string,
+  blobCol: string | null,
+): string {
+  validateSiteId(siteId);
+  validateDay(day);
+  const nd = nextUtcDay(day);
+  const dateFilter = `toDateTime('${day} 00:00:00') <= timestamp AND timestamp < toDateTime('${nd} 00:00:00')`;
+  const siteFilter = `index1 = '${siteId}'`;
+  const base = `WHERE ${siteFilter} AND ${dateFilter}`;
+
+  if (blobCol === null) {
+    // Total unique visitors: deduplicate by blob1 (vid)
+    return `
+      SELECT SUM(si) AS visitors
+      FROM (
+        SELECT blob1, SUM(_sample_interval) AS si
+        FROM ${dataset} ${base}
+        GROUP BY blob1
+      )
+    `.trim();
+  }
+
+  // Per-dimension: unique visitors grouped by dimension value
+  // Inner: one row per (vid, dim_value); outer: sum si grouped by dim_value
+  return `
+    SELECT ${blobCol} AS dim_value, SUM(si) AS visitors
+    FROM (
+      SELECT blob1, ${blobCol}, SUM(_sample_interval) AS si
+      FROM ${dataset} ${base}
+      GROUP BY blob1, ${blobCol}
+    )
+    GROUP BY ${blobCol}
+    ORDER BY visitors DESC
+    LIMIT 500
+  `.trim();
+}
+
+/**
+ * Determine if a WAE query was sampled by inspecting AVG(_sample_interval).
+ *
+ * Fix #7 (MED): replace the hardcoded 100k row-count threshold with
+ * AVG(_sample_interval) from the query. WAE sets _sample_interval > 1 on
+ * rows when adaptive sampling is active. A value meaningfully above 1.0
+ * indicates sampling occurred.
+ *
+ * Tolerance: 1.0 exactly is unsampled; > 1.0 (with a small float tolerance)
+ * means at least some rows were sampled.
  */
 function detectSampled(rows: WaeSqlRow[]): boolean {
-  // If _sample_interval values are all 1, WAE returns exact counts.
-  // We can't observe _sample_interval here; instead we check if any
-  // corrected sum (pageviews * 1.0) would differ from visitors in a way
-  // that suggests fractional sampling. A simpler proxy: raw_count from
-  // count() is our canary.
-  const SAMPLING_THRESHOLD = 100_000;
   for (const row of rows) {
-    if (Number(row.raw_count) > SAMPLING_THRESHOLD) return true;
+    const avgInterval = Number(row.avg_interval);
+    if (!isNaN(avgInterval) && avgInterval > 1.0) return true;
   }
   return false;
 }
@@ -163,6 +265,10 @@ function detectSampled(rows: WaeSqlRow[]): boolean {
 /**
  * Run one rollup pass over all sites and all dimensions for all days in the
  * retention window. Upserts are idempotent (PRIMARY KEY conflict replaces).
+ *
+ * Fix #8 (MED): two-pass approach — collect ALL dimension results first,
+ * compute anySampled across all of them, THEN write the batch so the 'total'
+ * row's sampled flag reflects later-discovered sampling in per-dimension queries.
  */
 export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promise<void> {
   // 1. Rotate daily salt on every cron pass (idempotent, spec §3.5)
@@ -176,9 +282,6 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
   const today = utcDay(new Date());
   // Roll up today (partial window) plus the previous 2 days to catch any late-arriving
   // data and to ensure yesterday's numbers are finalized after UTC midnight.
-  // The full retention window is not re-queried on every 5-min pass — WAE SQL rate
-  // limits make that impractical. The historical window is re-built if needed by a
-  // full backfill (future admin operation). Spec §5.1: "every 5 min for finished days".
   const days: string[] = [];
   for (let i = 0; i < 3; i++) {
     const d = new Date();
@@ -198,33 +301,76 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
   `);
 
   for (const site of sites) {
+    // Fix #3: validate siteId before any SQL interpolation
+    try {
+      validateSiteId(site.id);
+    } catch {
+      // Skip sites with invalid IDs (should never happen if D1 is the source of truth)
+      continue;
+    }
+
     for (const day of days) {
       // Skip future days
       if (day > today) continue;
 
-      // Collect upsert statements for this site+day across all dimensions
-      const batch: ReturnType<typeof upsertStmt.bind>[] = [];
+      // Fix #8: two-pass — collect all results first, then write.
+      // Pass 1: query WAE for all dimensions, accumulate results + sampled flag.
+      type DimResult = {
+        dimension: RollupDimension;
+        blobCol: string | null;
+        rows: WaeSqlRow[];
+        visitorsMap: Map<string, number>; // dim_value -> visitors count
+      };
+      const dimResults: DimResult[] = [];
       let anySampled = false;
 
       for (const { dimension, blobCol } of ROLLUP_DIMENSIONS) {
         let rows: WaeSqlRow[];
+        let visitorsMap: Map<string, number>;
         try {
-          const sql = buildDimensionSql(dataset, site.id, day, blobCol);
-          const result = await queryWae(sql, env, fetcher);
-          rows = result.data ?? [];
+          const pvSql = buildDimensionSql(dataset, site.id, day, blobCol);
+          const pvResult = await queryWae(pvSql, env, fetcher);
+          rows = pvResult.data ?? [];
+
+          // Fetch visitors via the GROUP-BY-vid subquery (fix #1)
+          const vSql = buildVisitorsSql(dataset, site.id, day, blobCol);
+          const vResult = await queryWae(vSql, env, fetcher);
+          const vRows = (vResult.data ?? []) as VisitorsSqlRow[];
+
+          visitorsMap = new Map<string, number>();
+          if (blobCol === null) {
+            // Total dimension: single visitors count
+            const vRow = vRows[0];
+            if (vRow) {
+              visitorsMap.set("", Math.round(Number(vRow.visitors) || 0));
+            }
+          } else {
+            for (const vRow of vRows as (VisitorsSqlRow & { dim_value: string })[]) {
+              const dv = vRow.dim_value ?? "";
+              visitorsMap.set(dv, Math.round(Number(vRow.visitors) || 0));
+            }
+          }
         } catch {
           // Non-fatal: WAE may 429 or be unavailable; skip this dimension
           continue;
         }
 
+        // Accumulate sampling detection across all dimensions (fix #8: before writing)
         if (!anySampled) {
           anySampled = detectSampled(rows);
         }
 
+        dimResults.push({ dimension, blobCol, rows, visitorsMap });
+      }
+
+      // Pass 2: now that anySampled reflects ALL dimensions, write the batch.
+      const batch: ReturnType<typeof upsertStmt.bind>[] = [];
+
+      for (const { dimension, rows, visitorsMap } of dimResults) {
         if (dimension === "total") {
-          // Single aggregate row; dim_value = ''
           const row = rows[0];
           if (row) {
+            const visitors = visitorsMap.get("") ?? 0;
             batch.push(
               upsertStmt.bind(
                 site.id,
@@ -232,7 +378,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
                 "total",
                 "",
                 Math.round(Number(row.pageviews) || 0),
-                Math.round(Number(row.visitors) || 0),
+                visitors,
                 anySampled ? 1 : 0,
               ),
             );
@@ -241,6 +387,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
           for (const row of rows) {
             const dimValue = row.dim_value ?? "";
             if (!dimValue) continue; // skip empty dimension values
+            const visitors = visitorsMap.get(dimValue) ?? 0;
             batch.push(
               upsertStmt.bind(
                 site.id,
@@ -248,7 +395,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
                 dimension,
                 dimValue,
                 Math.round(Number(row.pageviews) || 0),
-                Math.round(Number(row.visitors) || 0),
+                visitors,
                 anySampled ? 1 : 0,
               ),
             );

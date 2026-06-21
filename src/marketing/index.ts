@@ -19,14 +19,22 @@ export const marketing = new Hono<{ Bindings: Env }>();
 // ---------------------------------------------------------------------------
 const CLIENT_SCRIPT = `
 (function(){
-  var stops=[10000,50000,100000,250000,500000,1000000,2000000,5000000,10000000];
+  // Stops cover key tier boundaries: free ceiling ~3M (100k/day WAE * 30), paid $5 up to 10M, overage above.
+  var stops=[10000,100000,500000,1000000,3000000,5000000,10000000,50000000,100000000];
   function fmt(n){
     if(n>=1000000)return(n/1000000).toString().replace(/\\.0$/,'')+'M';
     if(n>=1000)return(n/1000)+'K';
     return String(n);
   }
+  // Cost model per spec §9:
+  //   ≤ 3M/mo  → $0 (Cloudflare free tier: 100k WAE writes/day + 100k Worker requests/day)
+  //   3M–10M   → $5 (Workers Paid base plan; WAE 10M + Workers 10M included, no meaningful overage)
+  //   > 10M    → $5 + (pv - 10M)/1M * 0.55  (WAE $0.25/M + Workers $0.30/M overage)
+  //              yields ~$55 at 100M — within the spec's $50–60 anchor.
   function calcCost(pv){
-    return pv<=1000000?0:Math.round(5+(pv-1000000)/1000000*0.6);
+    if(pv<=3000000)return 0;
+    if(pv<=10000000)return 5;
+    return Math.round(5+(pv-10000000)/1000000*0.55);
   }
   function updateCalc(idx){
     var pv=stops[idx];
@@ -34,8 +42,10 @@ const CLIENT_SCRIPT = `
     document.getElementById('calc-pv').textContent=fmt(pv);
     document.getElementById('calc-cost').textContent='$'+cost;
     document.getElementById('calc-note').textContent=cost===0
-      ? "You're comfortably inside Cloudflare's free tier — $0/mo. Stratus is open source, so there's nothing else to pay."
-      : "Roughly $"+cost+"/mo on Cloudflare Workers + D1 at this volume. Stratus stays free — you only pay Cloudflare for what you use.";
+      ? "You're inside Cloudflare's free tier (up to ~3M events/mo) — $0/mo. Stratus is open source, so there's nothing else to pay."
+      : cost===5
+        ? "You're on the Workers Paid plan ($5/mo base). WAE and Workers capacity up to 10M events/mo are included — no meaningful overage."
+        : "Roughly $"+cost+"/mo on Cloudflare Workers + Analytics Engine at this volume. Stratus stays free — you only pay Cloudflare for what you use.";
   }
   var slider=document.getElementById('calc-slider');
   if(slider){
@@ -43,8 +53,8 @@ const CLIENT_SCRIPT = `
     updateCalc(parseInt(slider.value,10));
   }
 
-  // FAQ accordion
-  document.querySelectorAll('.faq-item').forEach(function(item){
+  // FAQ accordion — first item starts open (faqOpen=0 per design)
+  document.querySelectorAll('.faq-item').forEach(function(item,i){
     var btn=item.querySelector('.faq-btn');
     var body=item.querySelector('.faq-body');
     var icon=item.querySelector('.faq-icon');
@@ -83,7 +93,7 @@ const FAQ: FaqItem[] = [
   },
   {
     q: "What does it actually cost to run?",
-    a: "The software is free and AGPL-3.0 licensed. You pay Cloudflare directly — usually $0 on the free tier, and around $5/mo once you pass roughly a million pageviews.",
+    a: "The software is free and AGPL-3.0 licensed. You pay Cloudflare directly — $0 on the free tier (up to roughly 3M pageviews/mo), and around $5/mo once you pass that ceiling (the Workers Paid base plan covers up to ~10M pageviews/mo).",
   },
   {
     q: "How big is the tracking script?",
@@ -104,13 +114,13 @@ const FAQ: FaqItem[] = [
 // ---------------------------------------------------------------------------
 function faqItems(): string {
   return FAQ.map(
-    ({ q, a }) => `
+    ({ q, a }, i) => `
     <div class="faq-item" style="background:#12151d;border:1px solid #20252f;border-radius:12px;overflow:hidden;">
       <div class="faq-btn" style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;cursor:pointer;user-select:none;">
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:500;font-size:16.5px;color:#fff;">${escHtml(q)}</span>
-        <span class="faq-icon" style="font-family:'Space Grotesk',sans-serif;font-size:22px;color:#6a7184;transition:transform .2s,color .2s;line-height:1;">+</span>
+        <span class="faq-icon" style="font-family:'Space Grotesk',sans-serif;font-size:22px;${i === 0 ? "color:#4d86ff;transform:rotate(45deg);" : "color:#6a7184;"}transition:transform .2s,color .2s;line-height:1;">+</span>
       </div>
-      <div class="faq-body" style="display:none;padding:0 24px 22px;font-size:14.5px;line-height:1.65;color:#9aa1b2;">${escHtml(a)}</div>
+      <div class="faq-body" style="display:${i === 0 ? "block" : "none"};padding:0 24px 22px;font-size:14.5px;line-height:1.65;color:#9aa1b2;">${escHtml(a)}</div>
     </div>`,
   ).join("\n");
 }
@@ -120,7 +130,8 @@ function escHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +180,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
       <a href="#how" style="cursor:pointer;">How it works</a>
       <a href="#pricing" style="cursor:pointer;">Pricing</a>
       <a href="#faq" style="cursor:pointer;">FAQ</a>
-      <a href="#" style="display:flex;align-items:center;gap:7px;border:1px solid #262b38;padding:8px 13px;border-radius:8px;color:#cfd4e0;"><span style="color:#ffce4d;">&#9733;</span> 4.2k</a>
+      <a href="#" style="display:flex;align-items:center;gap:7px;border:1px solid #262b38;padding:8px 13px;border-radius:8px;color:#cfd4e0;"><span style="color:#ffce4d;">&#9733;</span> GitHub</a>
       <a href="/login" style="background:#4d86ff;color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13.5px;cursor:pointer;">Deploy free</a>
     </div>
   </div>
@@ -228,7 +239,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
       <span style="font-size:13px;color:#9aa1b2;border:1px solid #20252f;padding:7px 14px;border-radius:8px;">R2</span>
       <span style="font-size:13px;color:#9aa1b2;border:1px solid #20252f;padding:7px 14px;border-radius:8px;">KV</span>
     </div>
-    <span style="margin-left:auto;font-size:13.5px;color:#8b92a4;white-space:nowrap;">Trusted by <span style="color:#fff;font-weight:600;">3,400+</span> indie hackers &amp; small teams</span>
+    <span style="margin-left:auto;font-size:13.5px;color:#8b92a4;white-space:nowrap;">Open source &middot; AGPL-3.0</span>
   </div>
 </div>
 
@@ -250,7 +261,7 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
     <div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#4d86ff;margin-bottom:18px;">03</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:19px;color:#fff;margin-bottom:11px;">Watch it in realtime</div>
-      <p style="font-size:15px;line-height:1.65;color:#8b92a4;margin:0;">Visitors appear the moment they land. Your data, your dashboard &mdash; about five dollars a month at a million views.</p>
+      <p style="font-size:15px;line-height:1.65;color:#8b92a4;margin:0;">Visitors appear the moment they land. Your data, your dashboard &mdash; free up to ~3M pageviews/mo, then ~$5/mo around 10M.</p>
     </div>
   </div>
 </div>
@@ -438,9 +449,9 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
           <div id="calc-cost" style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:30px;color:#2bd888;">$0</div>
         </div>
       </div>
-      <input id="calc-slider" type="range" min="0" max="8" step="1" value="5" style="width:100%;margin-bottom:14px;">
+      <input id="calc-slider" type="range" min="0" max="8" step="1" value="3" style="width:100%;margin-bottom:14px;">
       <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;margin-bottom:28px;">
-        <span>10K</span><span>1M</span><span>10M</span>
+        <span>10K</span><span>3M</span><span>100M</span>
       </div>
       <div id="calc-note" style="background:#0a0c11;border:1px solid #20252f;border-radius:11px;padding:18px 20px;font-size:13.5px;color:#9aa1b2;line-height:1.6;">
         You&apos;re comfortably inside Cloudflare&apos;s free tier &mdash; $0/mo. Stratus is open source, so there&apos;s nothing else to pay.

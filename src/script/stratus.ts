@@ -66,6 +66,13 @@
   type Props = Record<string, string | number | boolean>;
   type Api = { (cmd: string, n: string, p?: Props): void; track(n: string, p?: Props): void };
 
+  // Fix #5 (MED): capture any pre-existing window.stratus (and its .q) BEFORE
+  // overwriting it with the api object. After the overwrite, window.stratus has
+  // no .q, so reading it post-assignment would always give undefined and lose
+  // any events queued by the async-load snippet before the script loaded.
+  var prev = (window as Window & { stratus?: Api & { q?: unknown[][] } }).stratus;
+  var preQueue = prev?.q;
+
   var api = function (cmd: string, n: string, p?: Props): void {
     if (cmd === "event") send("event", n, p);
   } as Api;
@@ -74,10 +81,9 @@
   (window as Window & { stratus?: Api }).stratus = api;
 
   // Drain pre-queued calls (async-load snippet pattern)
-  var q = ((window as Window & { stratus?: Api & { q?: unknown[][] } }).stratus as unknown as { q?: unknown[][] })?.q;
-  if (q) {
-    for (var i = 0; i < q.length; i++) {
-      var call = q[i];
+  if (preQueue) {
+    for (var i = 0; i < preQueue.length; i++) {
+      var call = preQueue[i];
       if (call) api(String(call[0] ?? ""), String(call[1] ?? ""), call[2] as Props | undefined);
     }
   }
