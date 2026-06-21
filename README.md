@@ -22,7 +22,7 @@ few minutes:
 
 ### One-click deploy
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jasonmatthew/analytics)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jasonm4130/skopia)
 
 The button clones this repo into your account and provisions the following automatically
 from `wrangler.jsonc`:
