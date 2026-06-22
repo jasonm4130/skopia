@@ -40,6 +40,9 @@ coverage/
 # Session recaps — local working notes, never committed
 docs/recaps/
 
+# Claude Code — local-only settings (machine-specific paths, never committed)
+.claude/settings.local.json
+
 # Skopia foundation (node_modules, dist, .wrangler, coverage, *.log already
 # covered above; this entry is the wrangler-generated types file).
 worker-configuration.d.ts
