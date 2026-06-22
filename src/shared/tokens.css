@@ -1,0 +1,144 @@
+/**
+ * Skopia design tokens — the source of truth (ADR-0009).
+ *
+ * Extracted verbatim from the inline values in `src/marketing/index.ts` and
+ * `src/dashboard/index.ts`. This file is NOT imported by the Worker (Workers don't
+ * serve CSS from `src/`); it is the canonical reference that the marketing site
+ * (skopia-www) copies into `public/tokens.css`. When tokens change, edit them HERE
+ * and re-copy. Do not edit the marketing copy directly.
+ */
+
+:root {
+  /* === Colors === */
+  --color-bg: #0a0c11;
+  --color-bg-mid: #0c0e14;
+  --color-surface: #12151d;
+  --color-border: #20252f;
+  --color-border-subtle: #161a22;
+  --color-border-accent: #2a3550;
+  --color-border-alt: #2a3040;
+  --color-text-primary: #e8eaef;
+  --color-text-secondary: #9aa1b2;
+  --color-text-muted: #8b92a4;
+  --color-text-dim: #6a7184;
+  --color-text-faint: #5a6072;
+  --color-text-meta: #9097a8;
+  --color-accent: #4d86ff;
+  --color-accent-light: #9fb4ff;
+  --color-accent-soft: #8fb0ff;
+  --color-accent-purple: #7a5cff;
+  --color-green: #2bd888;
+  --color-yellow: #ffce4d;
+  --color-dot: #2c313d;
+  --color-chart-grid: #1a1f2a;
+  --color-muted-x: #454b59;
+  --color-scrollbar-thumb: #232838;
+  --color-nav-bg: rgba(10, 12, 17, 0.78);
+  --color-accent-bg-subtle: rgba(77, 134, 255, 0.1);
+  --color-accent-bg-faint: rgba(77, 134, 255, 0.04);
+  --color-accent-bg-header: rgba(77, 134, 255, 0.07);
+  --color-green-bg: rgba(43, 216, 136, 0.1);
+
+  /* === Typography === */
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "Hanken Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* === Layout === */
+  --max-width: 1180px;
+  --max-width-faq: 820px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 16px;
+  --radius-4xl: 20px;
+  --shadow-card: 0 36px 80px -30px rgba(0, 0, 0, 0.85);
+  --shadow-btn: 0 8px 26px rgba(77, 134, 255, 0.32);
+  --shadow-shot: 0 40px 90px -40px rgba(0, 0, 0, 0.9);
+}
+
+/* === Base reset === */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* === Animation === */
+@keyframes skopiaPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* === Range input (cost calculator) === */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--color-border);
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 3px solid var(--color-bg);
+  box-shadow: 0 0 0 1px var(--color-accent);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 3px solid var(--color-bg);
+  cursor: pointer;
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar {
+  width: 11px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}

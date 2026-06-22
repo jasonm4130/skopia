@@ -88,6 +88,16 @@ docs/specs/            Approved design specs (the source of truth for what we bu
 docs/decisions/        ADRs — one decision per file, dated, with context + consequences
 ```
 
+## Related repositories
+
+- **`../skopia-www`** — the marketing site (**skopia.dev**). Its own repo: a **static Astro**
+  site deployed to **Cloudflare Workers Static Assets** (ADR-0007), **not** a workspace member
+  of this repo (so the one-click Deploy button stays single-package). Design tokens flow
+  one-way: `src/shared/tokens.css` here is the **source of truth**, copied into
+  `skopia-www/public/tokens.css` (ADR-0009) — edit tokens here, then re-copy. The product
+  Worker serves the app/collector (`app.skopia.dev`); marketing owns the apex (`skopia.dev`).
+  Local cross-repo file access is wired via `.claude/settings.local.json` (gitignored).
+
 ## Workflow
 
 1. Research lands in `docs/research/`.
