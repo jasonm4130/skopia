@@ -142,7 +142,9 @@ async function hashPassword(password: string): Promise<string> {
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
+    // Workers hard-caps PBKDF2 at 100k iterations (Web Crypto); higher throws
+    // NotSupportedError at runtime. Keep hash + verify identical.
+    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
     keyMaterial,
     256,
   );
@@ -165,7 +167,9 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
+    // Workers hard-caps PBKDF2 at 100k iterations (Web Crypto); higher throws
+    // NotSupportedError at runtime. Keep hash + verify identical.
+    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
     keyMaterial,
     256,
   );
