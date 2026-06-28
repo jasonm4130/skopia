@@ -66,6 +66,3 @@ CREATE TABLE IF NOT EXISTS rollup_daily (
 
 CREATE INDEX IF NOT EXISTS idx_rollup_lookup
   ON rollup_daily (site_id, dimension, day);
-
--- Seed one site so the walking skeleton has a target out of the box.
-INSERT OR IGNORE INTO sites (id, name, domain) VALUES ('default', 'My Site', '');

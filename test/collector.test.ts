@@ -23,8 +23,8 @@ import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
 import { applyMigrations } from "./apply-migrations";
 
 beforeAll(async () => {
-  // Apply the real migrations/0001_init.sql so all tables (and the seed
-  // 'default' site) exist.
+  // Apply the real migrations/0001_init.sql so all tables exist (no demo site
+  // is seeded — the test registers its own sites below).
   await applyMigrations();
   // Seed test sites
   await env.DB.prepare(

@@ -96,13 +96,18 @@ function makeCollectorRequest(siteId = "default"): Request {
 // Tests
 // ---------------------------------------------------------------------------
 
-// Bootstrap the schema once (seeds the 'default' site via INSERT OR IGNORE).
-// This is distinct from apply-migrations: ensureSchema uses the embedded SQL
-// (the runtime cold-account path), not the Wrangler migration runner.
+// Bootstrap the schema once via ensureSchema (the runtime cold-account path,
+// which uses the embedded SQL rather than the Wrangler migration runner), then
+// register the test site. The migration no longer seeds a demo site, so the
+// collector's 404-on-unknown-site check would otherwise fire before the secret
+// guard we're exercising here.
 let schemaReady = false;
 beforeEach(async () => {
   if (!schemaReady) {
     await ensureSchema(env.DB as D1Database);
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
+      .bind("default", "Cold Test Site", "")
+      .run();
     schemaReady = true;
   }
   vi.mocked(queries.getOwner).mockResolvedValue(null); // default: no owner (cold account)

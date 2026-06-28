@@ -24,8 +24,8 @@ import {
 import { applyMigrations } from "./apply-migrations";
 
 beforeAll(async () => {
-  // Apply the real migrations/0001_init.sql (creates all tables + seeds the
-  // 'default' site).
+  // Apply the real migrations/0001_init.sql (creates all tables; no demo site
+  // is seeded — sites are registered explicitly).
   await applyMigrations();
 
   // Seed sites
@@ -75,11 +75,11 @@ beforeAll(async () => {
 // Site / user / goal metadata
 // ---------------------------------------------------------------------------
 describe("listSites", () => {
-  it("returns all seeded sites", async () => {
+  it("returns all registered sites and no demo seed", async () => {
     const sites = await listSites(env.DB);
     const ids = sites.map((s) => s.id);
     expect(ids).toContain("site-a");
-    expect(ids).toContain("default"); // seeded by migration
+    expect(ids).not.toContain("default"); // migration must not seed a demo site
   });
 });
 
@@ -152,7 +152,10 @@ describe("getStatCards", () => {
   });
 
   it("returns zeros for a site with no data", async () => {
-    const cards = await getStatCards(env.DB, "default", { from: "2026-06-19", to: "2026-06-21" });
+    const cards = await getStatCards(env.DB, "no-such-site", {
+      from: "2026-06-19",
+      to: "2026-06-21",
+    });
     expect(cards.pageviews).toBe(0);
     expect(cards.visitors).toBe(0);
   });
@@ -244,7 +247,7 @@ describe("getBreakdown / getTopPages", () => {
   it("returns empty array for site with no data", async () => {
     const pages = await getTopPages(
       env.DB,
-      "default",
+      "no-such-site",
       { from: "2026-06-19", to: "2026-06-21" },
       10,
     );

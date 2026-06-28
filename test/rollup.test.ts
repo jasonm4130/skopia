@@ -56,8 +56,8 @@ describe("buildDimensionSql", () => {
 });
 
 beforeAll(async () => {
-  // Apply the real migrations/0001_init.sql (creates all tables + seeds the
-  // 'default' site).
+  // Apply the real migrations/0001_init.sql (creates all tables; no demo site
+  // is seeded — the test registers its own sites below).
   await applyMigrations();
   await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
     .bind("rollup-site", "Rollup Test Site", "rollup.example.com")
