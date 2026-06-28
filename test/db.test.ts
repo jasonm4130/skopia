@@ -24,8 +24,8 @@ import {
 import { applyMigrations } from "./apply-migrations";
 
 beforeAll(async () => {
-  // Apply the real migrations/0001_init.sql (creates all tables + seeds the
-  // 'default' site).
+  // Apply the real migrations/0001_init.sql (creates all tables; no demo site
+  // is seeded — sites are registered explicitly).
   await applyMigrations();
 
   // Seed sites
@@ -75,11 +75,11 @@ beforeAll(async () => {
 // Site / user / goal metadata
 // ---------------------------------------------------------------------------
 describe("listSites", () => {
-  it("returns all seeded sites", async () => {
+  it("returns all registered sites and no demo seed", async () => {
     const sites = await listSites(env.DB);
     const ids = sites.map((s) => s.id);
     expect(ids).toContain("site-a");
-    expect(ids).toContain("default"); // seeded by migration
+    expect(ids).not.toContain("default"); // migration must not seed a demo site
   });
 });
 
@@ -152,7 +152,10 @@ describe("getStatCards", () => {
   });
 
   it("returns zeros for a site with no data", async () => {
-    const cards = await getStatCards(env.DB, "default", { from: "2026-06-19", to: "2026-06-21" });
+    const cards = await getStatCards(env.DB, "no-such-site", {
+      from: "2026-06-19",
+      to: "2026-06-21",
+    });
     expect(cards.pageviews).toBe(0);
     expect(cards.visitors).toBe(0);
   });
@@ -194,6 +197,38 @@ describe("getTimeSeries", () => {
     expect(series[1]?.pageviews).toBe(150);
     expect(series[2]?.pageviews).toBe(200);
   });
+
+  it("zero-fills days with no rollup row across the whole range", async () => {
+    // site-a has data only on 2026-06-19..21; query a wider 7-day window.
+    const series = await getTimeSeries(env.DB, "site-a", { from: "2026-06-17", to: "2026-06-23" });
+    // Expect one point per calendar day — 7 days — not just the 3 with data.
+    expect(series).toHaveLength(7);
+    expect(series.map((p) => p.day)).toEqual([
+      "2026-06-17",
+      "2026-06-18",
+      "2026-06-19",
+      "2026-06-20",
+      "2026-06-21",
+      "2026-06-22",
+      "2026-06-23",
+    ]);
+    // Days before/after the seeded range are zero-filled.
+    expect(series[0]).toMatchObject({
+      day: "2026-06-17",
+      pageviews: 0,
+      visitors: 0,
+      sampled: false,
+    });
+    expect(series[6]).toMatchObject({
+      day: "2026-06-23",
+      pageviews: 0,
+      visitors: 0,
+      sampled: false,
+    });
+    // Seeded days keep their real values.
+    expect(series[2]?.pageviews).toBe(100); // 2026-06-19
+    expect(series[4]?.pageviews).toBe(200); // 2026-06-21
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -222,7 +257,7 @@ describe("getBreakdown / getTopPages", () => {
   it("returns empty array for site with no data", async () => {
     const pages = await getTopPages(
       env.DB,
-      "default",
+      "no-such-site",
       { from: "2026-06-19", to: "2026-06-21" },
       10,
     );

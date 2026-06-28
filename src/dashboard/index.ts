@@ -21,7 +21,6 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import {
   getOwner,
-  getSite,
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
@@ -205,11 +204,15 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function parseRange(param: string | null | undefined): DateRange & { label: string; key: string } {
+export function parseRange(
+  param: string | null | undefined,
+): DateRange & { label: string; key: string } {
+  // `to` is today and the SQL window is inclusive on both ends, so "Last N days"
+  // = today and the N-1 days before it. daysAgo(N) would span N+1 days.
   const ranges: Record<string, { from: () => string; label: string }> = {
-    "7d": { from: () => daysAgo(7), label: "Last 7 days" },
-    "30d": { from: () => daysAgo(30), label: "Last 30 days" },
-    "90d": { from: () => daysAgo(90), label: "Last 90 days" },
+    "7d": { from: () => daysAgo(6), label: "Last 7 days" },
+    "30d": { from: () => daysAgo(29), label: "Last 30 days" },
+    "90d": { from: () => daysAgo(89), label: "Last 90 days" },
   };
   const key = param && ranges[param] ? param : "30d";
   const selected = ranges[key] ?? ranges["30d"]!;
@@ -342,7 +345,7 @@ const NAV_ITEMS = [
   { id: "geography", label: "Geography", href: "/app/geography" },
 ] as const;
 
-function sidebar(activeView: string, siteName: string, siteId: string): string {
+function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey: string): string {
   const navHtml = NAV_ITEMS.map(({ id, label, href }) => {
     const active = activeView === id;
     const style = [
@@ -355,19 +358,29 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
     const dotStyle = active
       ? "width:14px;height:14px;border-radius:3px;background:#4d86ff;"
       : "width:14px;height:14px;border-radius:3px;border:1.5px solid #3a4150;";
-    const fullHref = siteId ? `${href}?site=${esc(siteId)}` : href;
+    // Preserve the active range when navigating between views.
+    const fullHref = siteId
+      ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+      : `${href}?range=${esc(rangeKey)}`;
     return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
   }).join("\n");
+
+  // Site switcher: a <select> whose change event is wired by the nonced script
+  // in appLayout (inline on* handlers are blocked by the strict CSP).
+  const optionsHtml = sites
+    .map(
+      (s) =>
+        `<option value="${esc(s.id)}"${s.id === siteId ? " selected" : ""}>${esc(s.name)}</option>`,
+    )
+    .join("");
+  const switcher = `<select id="skopia-site-switcher" data-range="${esc(rangeKey)}" aria-label="Switch site" style="width:100%;cursor:pointer;font-size:13px;color:#e8eaef;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;appearance:none;-webkit-appearance:none;">${optionsHtml}</select>`;
 
   return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
     <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
       ${skopiaLogo()}
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
-    <div style="display:flex;align-items:center;gap:9px;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;margin-bottom:24px;">
-      <span style="width:8px;height:8px;border-radius:2px;background:#4d86ff;"></span>
-      <span style="font-size:13px;color:#e8eaef;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(siteName)}</span>
-    </div>
+    <div style="margin-bottom:24px;">${switcher}</div>
     ${navHtml}
     <div style="margin-top:auto;background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
       <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
@@ -378,13 +391,24 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
 
 function appLayout(
   activeView: string,
-  siteName: string,
-  siteId: string,
+  sites: SiteRow[],
+  site: SiteRow,
   headerRight: string,
   content: string,
+  nonce: string,
+  rangeKey: string,
 ): string {
+  // Wire the site switcher and range <select> change events here: the strict
+  // CSP (script-src 'self' 'nonce' 'strict-dynamic', no script-src-attr) blocks
+  // inline on* handlers, so these must be attached from a nonced script.
+  const navScript = `<script nonce="${nonce}">(function(){
+    var s=document.getElementById('skopia-site-switcher');
+    if(s){s.addEventListener('change',function(){location.href='/app?site='+encodeURIComponent(s.value)+'&range='+encodeURIComponent(s.getAttribute('data-range')||'30d');});}
+    var r=document.querySelector('select[name="range"]');
+    if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+  })();</script>`;
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
-  ${sidebar(activeView, siteName, siteId)}
+  ${sidebar(activeView, sites, site.id, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
@@ -397,6 +421,7 @@ function appLayout(
       ${content}
     </div>
   </div>
+  ${navScript}
 </div>`;
 }
 
@@ -418,7 +443,7 @@ function rangePicker(currentKey: string, extraParams: string): string {
     .join("");
   return `<form method="get" style="display:inline;">
     ${extraParams}
-    <select name="range" onchange="this.form.submit()" style="cursor:pointer;font-size:13px;color:#cfd4e0;background:#12151d;border:1px solid #262b38;padding:8px 15px;border-radius:8px;appearance:none;-webkit-appearance:none;">
+    <select name="range" style="cursor:pointer;font-size:13px;color:#cfd4e0;background:#12151d;border:1px solid #262b38;padding:8px 15px;border-radius:8px;appearance:none;-webkit-appearance:none;">
       ${optHtml}
     </select>
   </form>`;
@@ -429,20 +454,34 @@ function rangePicker(currentKey: string, extraParams: string): string {
 // ---------------------------------------------------------------------------
 
 function statCardsHtml(cards: StatCards, sampled: boolean): string {
-  const items = [
-    { label: "Visitors", value: fmtNum(cards.visitors) },
+  // `tip` carries an honest caveat for the metrics that are not exact counts.
+  // Rendered as a native title tooltip on an ⓘ glyph (no JS — CSP-safe).
+  const items: { label: string; value: string; tip?: string }[] = [
+    {
+      label: "Visitors",
+      value: fmtNum(cards.visitors),
+      tip: "Sum of each day's unique visitors. Someone who visits on several days is counted once per day, so multi-day totals run higher than true unique visitors.",
+    },
     { label: "Pageviews", value: fmtNum(cards.pageviews) },
     { label: "Views / Visitor", value: cards.viewsPerVisitor.toFixed(1) },
-    { label: "Single-Page Visits", value: fmtPct(cards.bounceRate) },
+    {
+      label: "Single-Page Visits",
+      value: fmtPct(cards.bounceRate),
+      tip: "Approximate. Estimated from pageviews and visitors, not per-session tracking.",
+    },
   ];
   const badge = sampled
     ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
     : "";
   const cardsHtml = items
     .map(
-      ({ label, value }) =>
+      ({ label, value, tip }) =>
         `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:18px 20px;">
-      <div style="font-size:12.5px;color:#8b92a4;margin-bottom:10px;">${esc(label)}</div>
+      <div style="font-size:12.5px;color:#8b92a4;margin-bottom:10px;">${esc(label)}${
+        tip
+          ? ` <span title="${esc(tip)}" style="cursor:help;color:#6a7184;border-bottom:1px dotted #3a4150;">&#9432;</span>`
+          : ""
+      }</div>
       <div style="display:flex;align-items:baseline;gap:8px;">
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:28px;color:#fff;letter-spacing:-.01em;">${esc(value)}${badge}</span>
       </div>
@@ -514,12 +553,12 @@ function timeSeriesChartHtml(
   return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;margin-bottom:20px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
     <div style="display:flex;gap:7px;">
-      <button id="btn-visitors" onclick="setMetric('visitors')" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#4d86ff;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
-      <button id="btn-pageviews" onclick="setMetric('pageviews')" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
+      <button id="btn-visitors" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#4d86ff;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
+      <button id="btn-pageviews" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
     </div>
     <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">${esc(rangeLabel)}</span>
   </div>
-  <div style="position:relative;height:250px;" id="chart-wrap" onmouseleave="clearHover()">
+  <div style="position:relative;height:250px;" id="chart-wrap">
     <svg id="chart-svg" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;">
       <defs>
         <linearGradient id="areaDash" x1="0" y1="0" x2="0" y2="1">
@@ -598,13 +637,19 @@ function timeSeriesChartHtml(
     document.getElementById('tip-pageviews').textContent=fmt(series[i].pv);
   }
 
-  window.clearHover=function(){
+  function clearHover(){
     document.getElementById('hover-line').style.display='none';
     document.getElementById('hover-dot').style.display='none';
     document.getElementById('hover-tip').style.display='none';
-  };
+  }
 
-  window.setMetric=function(m){metric=m;render();};
+  function setMetric(m){metric=m;render();}
+
+  // Wire handlers via addEventListener: the strict CSP (no script-src-attr)
+  // blocks inline onclick/onmouseleave, which silently killed the metric toggle.
+  document.getElementById('btn-visitors').addEventListener('click',function(){setMetric('visitors');});
+  document.getElementById('btn-pageviews').addEventListener('click',function(){setMetric('pageviews');});
+  document.getElementById('chart-wrap').addEventListener('mouseleave',clearHover);
 
   render();
 })();
@@ -813,18 +858,16 @@ function setupPage(nonce: string, error?: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: get the first site or 404
+// Helper: the full site list + the active site (for the switcher)
 // ---------------------------------------------------------------------------
 
-async function resolveQuerySite(
+async function resolveSites(
   db: D1Database,
   siteParam: string | undefined,
-): Promise<SiteRow | null> {
-  if (siteParam) {
-    return getSite(db, siteParam);
-  }
+): Promise<{ sites: SiteRow[]; site: SiteRow | null }> {
   const sites = await listSites(db);
-  return sites[0] ?? null;
+  const site = (siteParam ? sites.find((s) => s.id === siteParam) : sites[0]) ?? null;
+  return { sites, site };
 }
 
 // ---------------------------------------------------------------------------
@@ -1044,13 +1087,13 @@ dashboard.get("/app", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) {
     return c.html(
       htmlDoc(
         "No sites",
         "",
-        "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>",
+        "<div style='padding:60px;text-align:center;color:#6a7184;line-height:1.6;'>No sites tracked yet.<br>Register one with <code style='color:#9fb4ff;'>wrangler d1 execute skopia --remote --command \"INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')\"</code>, then reload.</div>",
         nonce,
       ),
     );
@@ -1079,7 +1122,12 @@ dashboard.get("/app", async (c) => {
   `;
 
   return c.html(
-    htmlDoc(site.name, "", appLayout("overview", site.name, site.id, headerRight, content), nonce),
+    htmlDoc(
+      site.name,
+      "",
+      appLayout("overview", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
   );
 });
 
@@ -1090,7 +1138,7 @@ dashboard.get("/app/pages", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopPages(c.env.DB, site.id, range, 50);
@@ -1112,7 +1160,7 @@ dashboard.get("/app/pages", async (c) => {
     htmlDoc(
       `Pages — ${site.name}`,
       "",
-      appLayout("pages", site.name, site.id, headerRight, content),
+      appLayout("pages", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
@@ -1125,7 +1173,7 @@ dashboard.get("/app/sources", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopSources(c.env.DB, site.id, range, 50);
@@ -1147,7 +1195,7 @@ dashboard.get("/app/sources", async (c) => {
     htmlDoc(
       `Sources — ${site.name}`,
       "",
-      appLayout("sources", site.name, site.id, headerRight, content),
+      appLayout("sources", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
@@ -1160,7 +1208,7 @@ dashboard.get("/app/geography", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopCountries(c.env.DB, site.id, range, 20);
@@ -1240,7 +1288,7 @@ dashboard.get("/app/geography", async (c) => {
     htmlDoc(
       `Geography — ${site.name}`,
       "",
-      appLayout("geography", site.name, site.id, headerRight, content),
+      appLayout("geography", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );

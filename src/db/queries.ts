@@ -117,12 +117,33 @@ export async function getTimeSeries(
     .bind(siteId, range.from, range.to)
     .all<{ day: string; pageviews: number; visitors: number; sampled: number }>();
 
-  return (result.results ?? []).map((r) => ({
-    day: r.day,
-    pageviews: Number(r.pageviews),
-    visitors: Number(r.visitors),
-    sampled: r.sampled === 1,
-  }));
+  // Zero-fill: the rollup only writes rows for days that had traffic, so a
+  // 30-day range can come back with 2-3 sparse rows. The chart positions points
+  // by array index (i/(n-1)), so a complete date spine is required for points to
+  // land at their true calendar positions — otherwise sparse data stretches
+  // across the full width as a misleading "flat then ramp" line.
+  const byDay = new Map(
+    (result.results ?? []).map((r) => [
+      r.day,
+      { pageviews: Number(r.pageviews), visitors: Number(r.visitors), sampled: r.sampled === 1 },
+    ]),
+  );
+
+  const points: TimeSeriesPoint[] = [];
+  const cursor = new Date(`${range.from}T00:00:00Z`);
+  const end = new Date(`${range.to}T00:00:00Z`);
+  while (cursor <= end) {
+    const day = cursor.toISOString().slice(0, 10);
+    const hit = byDay.get(day);
+    points.push({
+      day,
+      pageviews: hit?.pageviews ?? 0,
+      visitors: hit?.visitors ?? 0,
+      sampled: hit?.sampled ?? false,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return points;
 }
 
 // ---------------------------------------------------------------------------

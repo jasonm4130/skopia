@@ -136,11 +136,15 @@ async function queryWae(sql: string, env: Env, fetcher: typeof fetch): Promise<W
  *         sub-second events in the last second of the day.
  * Fix #7: avg_interval is returned for sampled-flag detection.
  */
-function buildDimensionSql(
+export function buildDimensionSql(
   dataset: string,
   siteId: string,
   day: string,
   blobCol: string | null,
+  // double2 = is_pageview (1 for pageviews, 0 for custom events). The "event"
+  // dimension must aggregate double1 (count, always 1) instead — otherwise every
+  // custom event rolls up with pageviews=0 and the events breakdown is empty.
+  metricCol: "double1" | "double2" = "double2",
 ): string {
   // Validation happens in runRollups before this is called; assert here defensively.
   validateSiteId(siteId);
@@ -158,7 +162,7 @@ function buildDimensionSql(
       SELECT
         '${day}' AS day,
         '' AS dim_value,
-        SUM(_sample_interval * double2) AS pageviews,
+        SUM(_sample_interval * ${metricCol}) AS pageviews,
         count() AS raw_count,
         AVG(_sample_interval) AS avg_interval
       ${base}
@@ -170,7 +174,7 @@ function buildDimensionSql(
     SELECT
       '${day}' AS day,
       ${blobCol} AS dim_value,
-      SUM(_sample_interval * double2) AS pageviews,
+      SUM(_sample_interval * ${metricCol}) AS pageviews,
       count() AS raw_count,
       AVG(_sample_interval) AS avg_interval
     ${base}
@@ -190,17 +194,20 @@ function buildDimensionSql(
  * GROUP BY vid subquery". WAE SQL supports subqueries in FROM (spec §5.2:
  * "Subqueries and CTE-free aggregates are fine").
  *
- * For unsampled data (the common case at self-host volumes): each vid row in
- * the inner subquery has si=events-for-that-vid; the outer SUM(si) gives total
- * events, but COUNT(*) in the outer gives the deduplicated unique visitor count.
- * For sampling-corrected uniques we use SUM(si) from the inner (where si =
- * SUM(_sample_interval) per vid) which gives the best approximation: each unique
- * visitor contributes their sampling weight once.
+ * The inner subquery GROUPs BY blob1 (vid) to get one row per distinct visitor;
+ * the outer COUNT(*) then yields the deduplicated unique-visitor count. (The
+ * previous SUM(_sample_interval) over the same subquery collapsed to the total
+ * weighted event count == pageviews — the visitors==pageviews bug.)
  *
- * For per-dimension queries (blobCol != null), we also filter to the dimension
- * so that visitors are scoped to that dimension value in the outer GROUP BY.
+ * Sampling note: at self-host volumes WAE does not sample (_sample_interval=1),
+ * so COUNT(*) is exact. Under sampling it counts only surviving distinct vids
+ * (an undercount); the `sampled` flag surfaces this to the dashboard. A
+ * sampling-corrected estimator (HLL) is a future enhancement, not needed here.
+ *
+ * For per-dimension queries (blobCol != null), the inner groups by (vid, dim)
+ * so visitors are scoped to each dimension value in the outer GROUP BY.
  */
-function buildVisitorsSql(
+export function buildVisitorsSql(
   dataset: string,
   siteId: string,
   day: string,
@@ -214,23 +221,23 @@ function buildVisitorsSql(
   const base = `WHERE ${siteFilter} AND ${dateFilter}`;
 
   if (blobCol === null) {
-    // Total unique visitors: deduplicate by blob1 (vid)
+    // Total unique visitors: COUNT distinct vids (one inner row per blob1).
     return `
-      SELECT SUM(si) AS visitors
+      SELECT COUNT(*) AS visitors
       FROM (
-        SELECT blob1, SUM(_sample_interval) AS si
+        SELECT blob1
         FROM ${dataset} ${base}
         GROUP BY blob1
       )
     `.trim();
   }
 
-  // Per-dimension: unique visitors grouped by dimension value
-  // Inner: one row per (vid, dim_value); outer: sum si grouped by dim_value
+  // Per-dimension: distinct visitors grouped by dimension value.
+  // Inner: one row per (vid, dim_value); outer: COUNT rows per dim_value.
   return `
-    SELECT ${blobCol} AS dim_value, SUM(si) AS visitors
+    SELECT ${blobCol} AS dim_value, COUNT(*) AS visitors
     FROM (
-      SELECT blob1, ${blobCol}, SUM(_sample_interval) AS si
+      SELECT blob1, ${blobCol}
       FROM ${dataset} ${base}
       GROUP BY blob1, ${blobCol}
     )
@@ -339,7 +346,10 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
         let rows: WaeSqlRow[];
         let visitorsMap: Map<string, number>;
         try {
-          const pvSql = buildDimensionSql(dataset, site.id, day, blobCol);
+          // The "event" dimension counts custom-event fires (double1), not
+          // pageviews (double2=is_pageview=0 for events).
+          const metricCol = dimension === "event" ? "double1" : "double2";
+          const pvSql = buildDimensionSql(dataset, site.id, day, blobCol, metricCol);
           const pvResult = await queryWae(pvSql, env, fetcher);
           rows = pvResult.data ?? [];
 
@@ -396,9 +406,14 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
           }
         } else {
           for (const row of rows) {
-            const dimValue = row.dim_value ?? "";
-            if (!dimValue) continue; // skip empty dimension values
-            const visitors = visitorsMap.get(dimValue) ?? 0;
+            const rawDimValue = row.dim_value ?? "";
+            // Direct traffic (no referrer) arrives with an empty value. Bucket it
+            // as "(direct)" so the Sources panel accounts for it rather than
+            // silently dropping it — but key visitorsMap by the raw "" value.
+            const dimValue =
+              rawDimValue === "" && dimension === "referrer" ? "(direct)" : rawDimValue;
+            if (!dimValue) continue; // skip empty dimension values for other dims
+            const visitors = visitorsMap.get(rawDimValue) ?? 0;
             batch.push(
               upsertStmt.bind(
                 site.id,

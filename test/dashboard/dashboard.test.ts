@@ -316,6 +316,15 @@ describe("stat-card labels", () => {
     expect(text).toContain("Single-Page Visits");
     expect(text).not.toContain("Bounce Rate");
   });
+
+  it("footnotes the imprecise metrics with an honest caveat tooltip", async () => {
+    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
+    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    // Visitors is a sum of daily uniques across the range — the caveat must say so.
+    expect(text).toContain("counted once per day");
+    // Single-Page Visits is estimated, not measured per-session.
+    expect(text).toContain("Approximate. Estimated from pageviews and visitors");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -356,6 +365,87 @@ describe("CSP nonce", () => {
     // The CSP header from the root middleware advertises the same nonce.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
+  });
+
+  it("chart metric toggle is wired via addEventListener, not blocked inline onclick", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // Strict CSP (no script-src-attr) blocks inline handlers, so the toggle must
+    // not rely on them — otherwise "Visitors vs Pageviews" silently does nothing.
+    expect(text).not.toMatch(/onclick="setMetric/);
+    expect(text).not.toMatch(/onmouseleave=/);
+    expect(text).toContain("getElementById('btn-visitors').addEventListener('click'");
+    expect(text).toContain("getElementById('btn-pageviews').addEventListener('click'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-site switcher, range preservation, empty state
+// ---------------------------------------------------------------------------
+
+const MOCK_SITE_2: SiteRow = {
+  id: "site-002",
+  name: "other.dev",
+  domain: "other.dev",
+  origin_allowlist: "",
+  public_token: "pub-tok-two",
+  created_at: 1700000001,
+};
+
+describe("site switcher", () => {
+  it("renders a switcher listing all sites with the active one selected", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain('id="skopia-site-switcher"');
+    expect(text).toContain('<option value="site-001" selected>test.dev</option>');
+    expect(text).toContain('<option value="site-002">other.dev</option>');
+  });
+
+  it("selects the site named by ?site= ", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app?site=site-002", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain('<option value="site-002" selected>other.dev</option>');
+    expect(text).toContain('<option value="site-001">test.dev</option>');
+  });
+});
+
+describe("range preservation across nav", () => {
+  it("sidebar nav links and the switcher carry the active range", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    // Navigating Overview → Pages must keep range=7d.
+    expect(text).toContain('href="/app/pages?site=site-001&range=7d"');
+    expect(text).toContain('href="/app/sources?site=site-001&range=7d"');
+    // The switcher remembers the range for its on-change navigation.
+    expect(text).toContain('data-range="7d"');
+  });
+});
+
+describe("no-sites empty state", () => {
+  it("renders honest setup copy without the misleading /setup link", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([]);
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("No sites tracked yet");
+    expect(text).toContain("wrangler d1 execute");
+    // The old copy linked to /setup (owner creation) — a redirect-loop trap.
+    expect(text).not.toContain("Add a site");
   });
 });
 

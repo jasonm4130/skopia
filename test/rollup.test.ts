@@ -5,7 +5,7 @@
  *
  * The rollup now issues TWO WAE queries per dimension:
  *   1. A pageviews query  — contains "AVG(_sample_interval)" (returns pageviews + avg_interval)
- *   2. A visitors query   — contains "SUM(si) AS visitors" (returns visitor counts from
+ *   2. A visitors query   — contains "GROUP BY blob1" (returns visitor counts from
  *                           a GROUP BY blob1 subquery)
  *
  * Fix #1: visitors != pageviews (unique visitor subquery).
@@ -15,12 +15,49 @@
 
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { runRollups } from "../src/rollup/index";
+import { buildDimensionSql, buildVisitorsSql, runRollups } from "../src/rollup/index";
 import { applyMigrations } from "./apply-migrations";
 
+// ---------------------------------------------------------------------------
+// SQL-builder unit tests (guard the exact aggregate formulas)
+// ---------------------------------------------------------------------------
+describe("buildVisitorsSql", () => {
+  it("counts DISTINCT visitor hashes, not total events (visitors != pageviews)", () => {
+    const sql = buildVisitorsSql("skopia_events", "site-a", "2026-06-19", null);
+    // Unique visitors = COUNT(*) over a GROUP BY blob1 subquery.
+    expect(sql).toContain("COUNT(*) AS visitors");
+    expect(sql).toContain("GROUP BY blob1");
+    // The old SUM(si) formula collapsed to total events == pageviews — must be gone.
+    expect(sql).not.toContain("SUM(si)");
+    expect(sql).not.toContain("SUM(_sample_interval)");
+  });
+
+  it("counts distinct visitors per dimension value for breakdowns", () => {
+    const sql = buildVisitorsSql("skopia_events", "site-a", "2026-06-19", "blob3");
+    expect(sql).toContain("COUNT(*) AS visitors");
+    expect(sql).toContain("GROUP BY blob1, blob3");
+    expect(sql).not.toContain("SUM(si)");
+  });
+});
+
+describe("buildDimensionSql", () => {
+  it("uses double2 (is_pageview) as the metric for pageview dimensions", () => {
+    const sql = buildDimensionSql("skopia_events", "site-a", "2026-06-19", "blob2");
+    expect(sql).toContain("SUM(_sample_interval * double2) AS pageviews");
+  });
+
+  it("uses double1 (count) as the metric for the event dimension so counts are non-zero", () => {
+    // Custom events have double2 (is_pageview) = 0, so the event dimension must
+    // aggregate double1 (count==1) or every event count rolls up as 0.
+    const sql = buildDimensionSql("skopia_events", "site-a", "2026-06-19", "blob11", "double1");
+    expect(sql).toContain("SUM(_sample_interval * double1) AS pageviews");
+    expect(sql).not.toContain("double2");
+  });
+});
+
 beforeAll(async () => {
-  // Apply the real migrations/0001_init.sql (creates all tables + seeds the
-  // 'default' site).
+  // Apply the real migrations/0001_init.sql (creates all tables; no demo site
+  // is seeded — the test registers its own sites below).
   await applyMigrations();
   await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
     .bind("rollup-site", "Rollup Test Site", "rollup.example.com")
@@ -36,7 +73,7 @@ beforeAll(async () => {
  *
  * The rollup now issues two WAE queries per dimension:
  *   - pageviews query: identified by "AVG(_sample_interval)" in the SQL body
- *   - visitors query:  identified by "SUM(si) AS visitors" in the SQL body
+ *   - visitors query:  identified by "GROUP BY blob1" in the SQL body
  *
  * `pvResponses` — keyed by a substring to match in the SQL; value = pageviews response
  *   (rows should have: pageviews, avg_interval)
@@ -52,7 +89,7 @@ function makeWaeFetcher(
     const sql = init?.body ? String(init.body) : "";
 
     // Identify query type by marker strings unique to each query
-    const isVisitorsQuery = sql.includes("SUM(si) AS visitors");
+    const isVisitorsQuery = sql.includes("GROUP BY blob1");
 
     const responses = isVisitorsQuery ? visitorResponses : pvResponses;
 
@@ -87,7 +124,7 @@ describe("runRollups", () => {
 
     // Pageviews query response (identified by AVG(_sample_interval) marker)
     const pvData = [{ day, dim_value: "", pageviews: 42, avg_interval: 1.0 }];
-    // Visitors query response (identified by SUM(si) AS visitors marker)
+    // Visitors query response (identified by GROUP BY blob1 marker)
     // 30 unique visitors != 42 pageviews — verifies the fix
     const visData = [{ visitors: 30 }];
 
@@ -222,7 +259,7 @@ describe("runRollups", () => {
     // Fix #8: the 'total' row must have sampled=1 because a later dimension revealed it.
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const sql = init?.body ? String(init.body) : "";
-      const isVisitorsQuery = sql.includes("SUM(si) AS visitors");
+      const isVisitorsQuery = sql.includes("GROUP BY blob1");
 
       if (isVisitorsQuery) {
         // Visitors query: always return simple count
@@ -259,5 +296,34 @@ describe("runRollups", () => {
 
     // The 'total' row must show sampled=1 because per-dimension data revealed sampling
     expect(row?.sampled).toBe(1);
+  });
+
+  it("buckets direct traffic (empty referrer) as '(direct)' rather than dropping it", async () => {
+    const day = today();
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
+      .bind("direct-site", "Direct Site", "direct.example.com")
+      .run();
+
+    // The referrer pageviews query (GROUP BY blob3) returns a direct-traffic row
+    // with an empty dim_value; the referrer visitors query (GROUP BY blob1, blob3)
+    // returns its visitor count. Both keyed by markers unique to the referrer dim.
+    const fetcher = makeWaeFetcher(
+      {
+        "blob3 AS dim_value": { data: [{ day, dim_value: "", pageviews: 12, avg_interval: 1.0 }] },
+      },
+      { "GROUP BY blob1, blob3": { data: [{ dim_value: "", visitors: 9 }] } },
+    );
+
+    await runRollups(env, fetcher);
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id = ? AND dimension = 'referrer' AND dim_value = '(direct)' AND day = ?",
+    )
+      .bind("direct-site", day)
+      .first<{ pageviews: number; visitors: number }>();
+
+    expect(row).not.toBeNull();
+    expect(row?.pageviews).toBe(12);
+    expect(row?.visitors).toBe(9);
   });
 });
