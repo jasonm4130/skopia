@@ -21,7 +21,6 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import {
   getOwner,
-  getSite,
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
@@ -346,7 +345,7 @@ const NAV_ITEMS = [
   { id: "geography", label: "Geography", href: "/app/geography" },
 ] as const;
 
-function sidebar(activeView: string, siteName: string, siteId: string): string {
+function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey: string): string {
   const navHtml = NAV_ITEMS.map(({ id, label, href }) => {
     const active = activeView === id;
     const style = [
@@ -359,19 +358,29 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
     const dotStyle = active
       ? "width:14px;height:14px;border-radius:3px;background:#4d86ff;"
       : "width:14px;height:14px;border-radius:3px;border:1.5px solid #3a4150;";
-    const fullHref = siteId ? `${href}?site=${esc(siteId)}` : href;
+    // Preserve the active range when navigating between views.
+    const fullHref = siteId
+      ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+      : `${href}?range=${esc(rangeKey)}`;
     return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
   }).join("\n");
+
+  // Site switcher: a <select> whose change event is wired by the nonced script
+  // in appLayout (inline on* handlers are blocked by the strict CSP).
+  const optionsHtml = sites
+    .map(
+      (s) =>
+        `<option value="${esc(s.id)}"${s.id === siteId ? " selected" : ""}>${esc(s.name)}</option>`,
+    )
+    .join("");
+  const switcher = `<select id="skopia-site-switcher" data-range="${esc(rangeKey)}" aria-label="Switch site" style="width:100%;cursor:pointer;font-size:13px;color:#e8eaef;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;appearance:none;-webkit-appearance:none;">${optionsHtml}</select>`;
 
   return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
     <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
       ${skopiaLogo()}
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
-    <div style="display:flex;align-items:center;gap:9px;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;margin-bottom:24px;">
-      <span style="width:8px;height:8px;border-radius:2px;background:#4d86ff;"></span>
-      <span style="font-size:13px;color:#e8eaef;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(siteName)}</span>
-    </div>
+    <div style="margin-bottom:24px;">${switcher}</div>
     ${navHtml}
     <div style="margin-top:auto;background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
       <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
@@ -382,13 +391,24 @@ function sidebar(activeView: string, siteName: string, siteId: string): string {
 
 function appLayout(
   activeView: string,
-  siteName: string,
-  siteId: string,
+  sites: SiteRow[],
+  site: SiteRow,
   headerRight: string,
   content: string,
+  nonce: string,
+  rangeKey: string,
 ): string {
+  // Wire the site switcher and range <select> change events here: the strict
+  // CSP (script-src 'self' 'nonce' 'strict-dynamic', no script-src-attr) blocks
+  // inline on* handlers, so these must be attached from a nonced script.
+  const navScript = `<script nonce="${nonce}">(function(){
+    var s=document.getElementById('skopia-site-switcher');
+    if(s){s.addEventListener('change',function(){location.href='/app?site='+encodeURIComponent(s.value)+'&range='+encodeURIComponent(s.getAttribute('data-range')||'30d');});}
+    var r=document.querySelector('select[name="range"]');
+    if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+  })();</script>`;
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
-  ${sidebar(activeView, siteName, siteId)}
+  ${sidebar(activeView, sites, site.id, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
@@ -401,6 +421,7 @@ function appLayout(
       ${content}
     </div>
   </div>
+  ${navScript}
 </div>`;
 }
 
@@ -422,7 +443,7 @@ function rangePicker(currentKey: string, extraParams: string): string {
     .join("");
   return `<form method="get" style="display:inline;">
     ${extraParams}
-    <select name="range" onchange="this.form.submit()" style="cursor:pointer;font-size:13px;color:#cfd4e0;background:#12151d;border:1px solid #262b38;padding:8px 15px;border-radius:8px;appearance:none;-webkit-appearance:none;">
+    <select name="range" style="cursor:pointer;font-size:13px;color:#cfd4e0;background:#12151d;border:1px solid #262b38;padding:8px 15px;border-radius:8px;appearance:none;-webkit-appearance:none;">
       ${optHtml}
     </select>
   </form>`;
@@ -817,18 +838,16 @@ function setupPage(nonce: string, error?: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: get the first site or 404
+// Helper: the full site list + the active site (for the switcher)
 // ---------------------------------------------------------------------------
 
-async function resolveQuerySite(
+async function resolveSites(
   db: D1Database,
   siteParam: string | undefined,
-): Promise<SiteRow | null> {
-  if (siteParam) {
-    return getSite(db, siteParam);
-  }
+): Promise<{ sites: SiteRow[]; site: SiteRow | null }> {
   const sites = await listSites(db);
-  return sites[0] ?? null;
+  const site = (siteParam ? sites.find((s) => s.id === siteParam) : sites[0]) ?? null;
+  return { sites, site };
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,13 +1067,13 @@ dashboard.get("/app", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) {
     return c.html(
       htmlDoc(
         "No sites",
         "",
-        "<div style='padding:60px;text-align:center;color:#6a7184;'>No sites tracked yet. <a href='/setup' style='color:#4d86ff;'>Add a site</a></div>",
+        "<div style='padding:60px;text-align:center;color:#6a7184;line-height:1.6;'>No sites tracked yet.<br>Register one with <code style='color:#9fb4ff;'>wrangler d1 execute skopia --remote --command \"INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')\"</code>, then reload.</div>",
         nonce,
       ),
     );
@@ -1083,7 +1102,12 @@ dashboard.get("/app", async (c) => {
   `;
 
   return c.html(
-    htmlDoc(site.name, "", appLayout("overview", site.name, site.id, headerRight, content), nonce),
+    htmlDoc(
+      site.name,
+      "",
+      appLayout("overview", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
   );
 });
 
@@ -1094,7 +1118,7 @@ dashboard.get("/app/pages", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopPages(c.env.DB, site.id, range, 50);
@@ -1116,7 +1140,7 @@ dashboard.get("/app/pages", async (c) => {
     htmlDoc(
       `Pages — ${site.name}`,
       "",
-      appLayout("pages", site.name, site.id, headerRight, content),
+      appLayout("pages", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
@@ -1129,7 +1153,7 @@ dashboard.get("/app/sources", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopSources(c.env.DB, site.id, range, 50);
@@ -1151,7 +1175,7 @@ dashboard.get("/app/sources", async (c) => {
     htmlDoc(
       `Sources — ${site.name}`,
       "",
-      appLayout("sources", site.name, site.id, headerRight, content),
+      appLayout("sources", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
@@ -1164,7 +1188,7 @@ dashboard.get("/app/geography", async (c) => {
   const rangeParam = c.req.query("range");
   const range = parseRange(rangeParam);
 
-  const site = await resolveQuerySite(c.env.DB, siteParam);
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) return c.redirect("/app");
 
   const rows = await getTopCountries(c.env.DB, site.id, range, 20);
@@ -1244,7 +1268,7 @@ dashboard.get("/app/geography", async (c) => {
     htmlDoc(
       `Geography — ${site.name}`,
       "",
-      appLayout("geography", site.name, site.id, headerRight, content),
+      appLayout("geography", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
