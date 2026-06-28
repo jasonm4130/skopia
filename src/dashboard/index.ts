@@ -205,11 +205,15 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function parseRange(param: string | null | undefined): DateRange & { label: string; key: string } {
+export function parseRange(
+  param: string | null | undefined,
+): DateRange & { label: string; key: string } {
+  // `to` is today and the SQL window is inclusive on both ends, so "Last N days"
+  // = today and the N-1 days before it. daysAgo(N) would span N+1 days.
   const ranges: Record<string, { from: () => string; label: string }> = {
-    "7d": { from: () => daysAgo(7), label: "Last 7 days" },
-    "30d": { from: () => daysAgo(30), label: "Last 30 days" },
-    "90d": { from: () => daysAgo(90), label: "Last 90 days" },
+    "7d": { from: () => daysAgo(6), label: "Last 7 days" },
+    "30d": { from: () => daysAgo(29), label: "Last 30 days" },
+    "90d": { from: () => daysAgo(89), label: "Last 90 days" },
   };
   const key = param && ranges[param] ? param : "30d";
   const selected = ranges[key] ?? ranges["30d"]!;
