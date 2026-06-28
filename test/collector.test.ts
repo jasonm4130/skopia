@@ -11,7 +11,12 @@
  * - POST /e: valid beacon returns 204
  */
 
-import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import {
+  createExecutionContext,
+  env,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { handleCollect, handlePreflight } from "../src/collector/index";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
@@ -374,5 +379,43 @@ describe("handleCollect — WAE slot mapping", () => {
     expect(dp.blobs[12]).toBe(JSON.stringify({ plan: "pro" }));
 
     vi.restoreAllMocks();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live count (SiteLive DO bump)
+// ---------------------------------------------------------------------------
+describe("handleCollect — SiteLive DO bump", () => {
+  it("bumps the DO with the real vid so distinct visitors are counted, not collapsed to 'unknown'", async () => {
+    // Fresh site id → fresh DO with an empty visitor map (isolated from other tests).
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("live-site", "Live Site", "live.com", "")
+      .run();
+
+    // Two beacons from two different visitors (distinct IPs → distinct vids).
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "live-site", p: "/a" }, { ip: "203.0.113.1" }),
+      env,
+      ctx,
+    );
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "live-site", p: "/b" }, { ip: "203.0.113.2" }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx); // flush the waitUntil DO bumps
+
+    const stub = env.SITE_LIVE.get(env.SITE_LIVE.idFromName("live-site"));
+    const count = await runInDurableObject(
+      stub,
+      (instance) => (instance as unknown as { visitors: Map<string, unknown> }).visitors.size,
+    );
+
+    // With the body-vs-query-param bug both visitors collapse to "unknown" → 1.
+    // Correctly wired, the two distinct vids yield 2.
+    expect(count).toBe(2);
   });
 });
