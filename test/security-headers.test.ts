@@ -99,4 +99,23 @@ describe("securityHeaders middleware", () => {
     const csp = res.headers.get("Content-Security-Policy") ?? "";
     expect(csp).toContain("'strict-dynamic'");
   });
+
+  it("passes a 101 WebSocket upgrade through without throwing (immutable headers)", async () => {
+    // The /live route proxies a 101 Switching Protocols response from the
+    // SiteLive DO. Its headers are immutable; setting CSP/hardening headers on
+    // it throws "Can't modify immutable headers" → 500. The middleware must
+    // skip header mutation for 101 responses.
+    const app = new Hono<AppEnv>();
+    app.use("*", securityHeaders);
+    app.get("/live", () => {
+      const pair = new WebSocketPair();
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    });
+    const res = await app.fetch(
+      new Request("https://test.local/live", { headers: { Upgrade: "websocket" } }),
+    );
+    expect(res.status).toBe(101);
+    // CSP must NOT be forced onto the upgrade response.
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
 });

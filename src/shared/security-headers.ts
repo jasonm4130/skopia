@@ -22,6 +22,12 @@ export const securityHeaders: MiddlewareHandler<AppEnv> = async (c, next) => {
 
   await next();
 
+  // 101 Switching Protocols (the /live WebSocket upgrade, proxied from the
+  // SiteLive DO) carries immutable headers — setting any header below throws
+  // "Can't modify immutable headers" → 500. Security headers are meaningless on
+  // a protocol-switch response anyway, so skip them.
+  if (c.res.status === 101) return;
+
   const csp = [
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     // style-src governs <style>/<link> stylesheets — nonce only, no
