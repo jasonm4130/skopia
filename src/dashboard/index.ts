@@ -454,20 +454,34 @@ function rangePicker(currentKey: string, extraParams: string): string {
 // ---------------------------------------------------------------------------
 
 function statCardsHtml(cards: StatCards, sampled: boolean): string {
-  const items = [
-    { label: "Visitors", value: fmtNum(cards.visitors) },
+  // `tip` carries an honest caveat for the metrics that are not exact counts.
+  // Rendered as a native title tooltip on an ⓘ glyph (no JS — CSP-safe).
+  const items: { label: string; value: string; tip?: string }[] = [
+    {
+      label: "Visitors",
+      value: fmtNum(cards.visitors),
+      tip: "Sum of each day's unique visitors. Someone who visits on several days is counted once per day, so multi-day totals run higher than true unique visitors.",
+    },
     { label: "Pageviews", value: fmtNum(cards.pageviews) },
     { label: "Views / Visitor", value: cards.viewsPerVisitor.toFixed(1) },
-    { label: "Single-Page Visits", value: fmtPct(cards.bounceRate) },
+    {
+      label: "Single-Page Visits",
+      value: fmtPct(cards.bounceRate),
+      tip: "Approximate. Estimated from pageviews and visitors, not per-session tracking.",
+    },
   ];
   const badge = sampled
     ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
     : "";
   const cardsHtml = items
     .map(
-      ({ label, value }) =>
+      ({ label, value, tip }) =>
         `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:18px 20px;">
-      <div style="font-size:12.5px;color:#8b92a4;margin-bottom:10px;">${esc(label)}</div>
+      <div style="font-size:12.5px;color:#8b92a4;margin-bottom:10px;">${esc(label)}${
+        tip
+          ? ` <span title="${esc(tip)}" style="cursor:help;color:#6a7184;border-bottom:1px dotted #3a4150;">&#9432;</span>`
+          : ""
+      }</div>
       <div style="display:flex;align-items:baseline;gap:8px;">
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:28px;color:#fff;letter-spacing:-.01em;">${esc(value)}${badge}</span>
       </div>
@@ -539,12 +553,12 @@ function timeSeriesChartHtml(
   return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;margin-bottom:20px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
     <div style="display:flex;gap:7px;">
-      <button id="btn-visitors" onclick="setMetric('visitors')" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#4d86ff;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
-      <button id="btn-pageviews" onclick="setMetric('pageviews')" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
+      <button id="btn-visitors" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#4d86ff;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
+      <button id="btn-pageviews" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
     </div>
     <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">${esc(rangeLabel)}</span>
   </div>
-  <div style="position:relative;height:250px;" id="chart-wrap" onmouseleave="clearHover()">
+  <div style="position:relative;height:250px;" id="chart-wrap">
     <svg id="chart-svg" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;">
       <defs>
         <linearGradient id="areaDash" x1="0" y1="0" x2="0" y2="1">
@@ -623,13 +637,19 @@ function timeSeriesChartHtml(
     document.getElementById('tip-pageviews').textContent=fmt(series[i].pv);
   }
 
-  window.clearHover=function(){
+  function clearHover(){
     document.getElementById('hover-line').style.display='none';
     document.getElementById('hover-dot').style.display='none';
     document.getElementById('hover-tip').style.display='none';
-  };
+  }
 
-  window.setMetric=function(m){metric=m;render();};
+  function setMetric(m){metric=m;render();}
+
+  // Wire handlers via addEventListener: the strict CSP (no script-src-attr)
+  // blocks inline onclick/onmouseleave, which silently killed the metric toggle.
+  document.getElementById('btn-visitors').addEventListener('click',function(){setMetric('visitors');});
+  document.getElementById('btn-pageviews').addEventListener('click',function(){setMetric('pageviews');});
+  document.getElementById('chart-wrap').addEventListener('mouseleave',clearHover);
 
   render();
 })();
