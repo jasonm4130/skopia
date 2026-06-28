@@ -406,9 +406,14 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
           }
         } else {
           for (const row of rows) {
-            const dimValue = row.dim_value ?? "";
-            if (!dimValue) continue; // skip empty dimension values
-            const visitors = visitorsMap.get(dimValue) ?? 0;
+            const rawDimValue = row.dim_value ?? "";
+            // Direct traffic (no referrer) arrives with an empty value. Bucket it
+            // as "(direct)" so the Sources panel accounts for it rather than
+            // silently dropping it — but key visitorsMap by the raw "" value.
+            const dimValue =
+              rawDimValue === "" && dimension === "referrer" ? "(direct)" : rawDimValue;
+            if (!dimValue) continue; // skip empty dimension values for other dims
+            const visitors = visitorsMap.get(rawDimValue) ?? 0;
             batch.push(
               upsertStmt.bind(
                 site.id,

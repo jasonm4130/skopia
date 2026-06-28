@@ -297,4 +297,31 @@ describe("runRollups", () => {
     // The 'total' row must show sampled=1 because per-dimension data revealed sampling
     expect(row?.sampled).toBe(1);
   });
+
+  it("buckets direct traffic (empty referrer) as '(direct)' rather than dropping it", async () => {
+    const day = today();
+    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
+      .bind("direct-site", "Direct Site", "direct.example.com")
+      .run();
+
+    // The referrer pageviews query (GROUP BY blob3) returns a direct-traffic row
+    // with an empty dim_value; the referrer visitors query (GROUP BY blob1, blob3)
+    // returns its visitor count. Both keyed by markers unique to the referrer dim.
+    const fetcher = makeWaeFetcher(
+      { "blob3 AS dim_value": { data: [{ day, dim_value: "", pageviews: 12, avg_interval: 1.0 }] } },
+      { "GROUP BY blob1, blob3": { data: [{ dim_value: "", visitors: 9 }] } },
+    );
+
+    await runRollups(env, fetcher);
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id = ? AND dimension = 'referrer' AND dim_value = '(direct)' AND day = ?",
+    )
+      .bind("direct-site", day)
+      .first<{ pageviews: number; visitors: number }>();
+
+    expect(row).not.toBeNull();
+    expect(row?.pageviews).toBe(12);
+    expect(row?.visitors).toBe(9);
+  });
 });
