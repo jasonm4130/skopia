@@ -308,7 +308,9 @@ describe("runRollups", () => {
     // with an empty dim_value; the referrer visitors query (GROUP BY blob1, blob3)
     // returns its visitor count. Both keyed by markers unique to the referrer dim.
     const fetcher = makeWaeFetcher(
-      { "blob3 AS dim_value": { data: [{ day, dim_value: "", pageviews: 12, avg_interval: 1.0 }] } },
+      {
+        "blob3 AS dim_value": { data: [{ day, dim_value: "", pageviews: 12, avg_interval: 1.0 }] },
+      },
       { "GROUP BY blob1, blob3": { data: [{ dim_value: "", visitors: 9 }] } },
     );
 

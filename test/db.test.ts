@@ -213,8 +213,18 @@ describe("getTimeSeries", () => {
       "2026-06-23",
     ]);
     // Days before/after the seeded range are zero-filled.
-    expect(series[0]).toMatchObject({ day: "2026-06-17", pageviews: 0, visitors: 0, sampled: false });
-    expect(series[6]).toMatchObject({ day: "2026-06-23", pageviews: 0, visitors: 0, sampled: false });
+    expect(series[0]).toMatchObject({
+      day: "2026-06-17",
+      pageviews: 0,
+      visitors: 0,
+      sampled: false,
+    });
+    expect(series[6]).toMatchObject({
+      day: "2026-06-23",
+      pageviews: 0,
+      visitors: 0,
+      sampled: false,
+    });
     // Seeded days keep their real values.
     expect(series[2]?.pageviews).toBe(100); // 2026-06-19
     expect(series[4]?.pageviews).toBe(200); // 2026-06-21

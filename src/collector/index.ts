@@ -242,11 +242,9 @@ export async function handleCollect(
     beacon.p ?? "/",
   )}`;
   ctx.waitUntil(
-    doStub
-      .fetch(new Request(hitUrl, { method: "POST" }))
-      .catch(() => {
-        // DO is best-effort; don't let failures kill the beacon response
-      }),
+    doStub.fetch(new Request(hitUrl, { method: "POST" })).catch(() => {
+      // DO is best-effort; don't let failures kill the beacon response
+    }),
   );
 
   // ---------- 14. Respond 204 ----------
