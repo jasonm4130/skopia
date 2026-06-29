@@ -34,10 +34,6 @@ interface WaeSqlRow {
   raw_count: number | string;
 }
 
-interface VisitorsSqlRow {
-  visitors: number | string;
-}
-
 // ---------------------------------------------------------------------------
 // Rollup dimensions and their WAE blob columns
 // ---------------------------------------------------------------------------
@@ -128,8 +124,11 @@ async function queryWae(sql: string, env: Env, fetcher: typeof fetch): Promise<W
  * Build the SQL to aggregate one dimension for one day.
  *
  * WAE SQL constraints (spec §5.2): no JOIN, no UNION. We run one query per
- * dimension per day. Sampling-correct pageviews use SUM(_sample_interval * double2).
- * Unique visitors are computed via a separate visitors query (buildVisitorsSql).
+ * dimension per day, returning BOTH metrics in the same rows: sampling-correct
+ * pageviews via SUM(_sample_interval * doubleN), and unique visitors via
+ * COUNT(DISTINCT blob1). Keeping it to one query per dimension is load-bearing:
+ * a second visitors query per dimension doubled the WAE round-trips and timed
+ * the cron out before it could write.
  *
  * Fix #3: siteId is validated against SITE_ID_RE before interpolation.
  * Fix #4: upper bound uses nextDay 00:00:00 (not <day> 23:59:59) to include
@@ -163,6 +162,7 @@ export function buildDimensionSql(
         '${day}' AS day,
         '' AS dim_value,
         SUM(_sample_interval * ${metricCol}) AS pageviews,
+        COUNT(DISTINCT blob1) AS visitors,
         count() AS raw_count,
         AVG(_sample_interval) AS avg_interval
       ${base}
@@ -175,74 +175,12 @@ export function buildDimensionSql(
       '${day}' AS day,
       ${blobCol} AS dim_value,
       SUM(_sample_interval * ${metricCol}) AS pageviews,
+      COUNT(DISTINCT blob1) AS visitors,
       count() AS raw_count,
       AVG(_sample_interval) AS avg_interval
     ${base}
     GROUP BY ${blobCol}
     ORDER BY pageviews DESC
-    LIMIT 500
-  `.trim();
-}
-
-/**
- * Build the SQL to count unique visitors for one dimension for one day.
- *
- * Fix #1 (HIGH): unique visitors must come from a GROUP BY blob1 (vid) subquery,
- * not SUM(_sample_interval) which gives event counts (visitors == pageviews bug).
- *
- * Pattern per spec §4.1 / §5.2: "uniques use SUM(_sample_interval) over a
- * GROUP BY vid subquery". WAE SQL supports subqueries in FROM (spec §5.2:
- * "Subqueries and CTE-free aggregates are fine").
- *
- * The inner subquery GROUPs BY blob1 (vid) to get one row per distinct visitor;
- * the outer COUNT(*) then yields the deduplicated unique-visitor count. (The
- * previous SUM(_sample_interval) over the same subquery collapsed to the total
- * weighted event count == pageviews — the visitors==pageviews bug.)
- *
- * Sampling note: at self-host volumes WAE does not sample (_sample_interval=1),
- * so COUNT(*) is exact. Under sampling it counts only surviving distinct vids
- * (an undercount); the `sampled` flag surfaces this to the dashboard. A
- * sampling-corrected estimator (HLL) is a future enhancement, not needed here.
- *
- * For per-dimension queries (blobCol != null), the inner groups by (vid, dim)
- * so visitors are scoped to each dimension value in the outer GROUP BY.
- */
-export function buildVisitorsSql(
-  dataset: string,
-  siteId: string,
-  day: string,
-  blobCol: string | null,
-): string {
-  validateSiteId(siteId);
-  validateDay(day);
-  const nd = nextUtcDay(day);
-  const dateFilter = `toDateTime('${day} 00:00:00') <= timestamp AND timestamp < toDateTime('${nd} 00:00:00')`;
-  const siteFilter = `index1 = '${siteId}'`;
-  const base = `WHERE ${siteFilter} AND ${dateFilter}`;
-
-  if (blobCol === null) {
-    // Total unique visitors: COUNT distinct vids (one inner row per blob1).
-    return `
-      SELECT COUNT(*) AS visitors
-      FROM (
-        SELECT blob1
-        FROM ${dataset} ${base}
-        GROUP BY blob1
-      )
-    `.trim();
-  }
-
-  // Per-dimension: distinct visitors grouped by dimension value.
-  // Inner: one row per (vid, dim_value); outer: COUNT rows per dim_value.
-  return `
-    SELECT ${blobCol} AS dim_value, COUNT(*) AS visitors
-    FROM (
-      SELECT blob1, ${blobCol}
-      FROM ${dataset} ${base}
-      GROUP BY blob1, ${blobCol}
-    )
-    GROUP BY ${blobCol}
-    ORDER BY visitors DESC
     LIMIT 500
   `.trim();
 }
@@ -337,61 +275,42 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
         dimension: RollupDimension;
         blobCol: string | null;
         rows: WaeSqlRow[];
-        visitorsMap: Map<string, number>; // dim_value -> visitors count
       };
-      const dimResults: DimResult[] = [];
-      let anySampled = false;
-
-      for (const { dimension, blobCol } of ROLLUP_DIMENSIONS) {
-        let rows: WaeSqlRow[];
-        let visitorsMap: Map<string, number>;
-        try {
-          // The "event" dimension counts custom-event fires (double1), not
-          // pageviews (double2=is_pageview=0 for events).
-          const metricCol = dimension === "event" ? "double1" : "double2";
-          const pvSql = buildDimensionSql(dataset, site.id, day, blobCol, metricCol);
-          const pvResult = await queryWae(pvSql, env, fetcher);
-          rows = pvResult.data ?? [];
-
-          // Fetch visitors via the GROUP-BY-vid subquery (fix #1)
-          const vSql = buildVisitorsSql(dataset, site.id, day, blobCol);
-          const vResult = await queryWae(vSql, env, fetcher);
-          const vRows = (vResult.data ?? []) as VisitorsSqlRow[];
-
-          visitorsMap = new Map<string, number>();
-          if (blobCol === null) {
-            // Total dimension: single visitors count
-            const vRow = vRows[0];
-            if (vRow) {
-              visitorsMap.set("", Math.round(Number(vRow.visitors) || 0));
-            }
-          } else {
-            for (const vRow of vRows as (VisitorsSqlRow & { dim_value: string })[]) {
-              const dv = vRow.dim_value ?? "";
-              visitorsMap.set(dv, Math.round(Number(vRow.visitors) || 0));
-            }
+      // Query all dimensions for this (site, day) concurrently. WAE queries are
+      // I/O-bound HTTP round-trips; running the ~11 dimensions sequentially made
+      // the full pass (sites × days × dimensions) exceed the cron's time budget
+      // as the site count grew, so it was cancelled before writing. One query
+      // per dimension returns BOTH pageviews and unique visitors
+      // (COUNT(DISTINCT blob1)); fanning them out keeps each (site, day) to a
+      // single round-trip of wall-clock instead of eleven.
+      const settled = await Promise.all(
+        ROLLUP_DIMENSIONS.map(async ({ dimension, blobCol }): Promise<DimResult | null> => {
+          try {
+            // The "event" dimension counts custom-event fires (double1), not
+            // pageviews (double2=is_pageview=0 for events).
+            const metricCol = dimension === "event" ? "double1" : "double2";
+            const sql = buildDimensionSql(dataset, site.id, day, blobCol, metricCol);
+            const result = await queryWae(sql, env, fetcher);
+            return { dimension, blobCol, rows: result.data ?? [] };
+          } catch {
+            // Non-fatal: WAE may 429 or be unavailable; skip this dimension
+            return null;
           }
-        } catch {
-          // Non-fatal: WAE may 429 or be unavailable; skip this dimension
-          continue;
-        }
+        }),
+      );
+      const dimResults = settled.filter((r): r is DimResult => r !== null);
 
-        // Accumulate sampling detection across all dimensions (fix #8: before writing)
-        if (!anySampled) {
-          anySampled = detectSampled(rows);
-        }
-
-        dimResults.push({ dimension, blobCol, rows, visitorsMap });
-      }
+      // Accumulate sampling detection across all dimensions (fix #8: before writing)
+      const anySampled = dimResults.some((r) => detectSampled(r.rows));
 
       // Pass 2: now that anySampled reflects ALL dimensions, write the batch.
       const batch: ReturnType<typeof upsertStmt.bind>[] = [];
 
-      for (const { dimension, rows, visitorsMap } of dimResults) {
+      for (const { dimension, rows } of dimResults) {
         if (dimension === "total") {
           const row = rows[0];
           if (row) {
-            const visitors = visitorsMap.get("") ?? 0;
+            const visitors = Math.round(Number(row.visitors) || 0);
             batch.push(
               upsertStmt.bind(
                 site.id,
@@ -409,11 +328,11 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
             const rawDimValue = row.dim_value ?? "";
             // Direct traffic (no referrer) arrives with an empty value. Bucket it
             // as "(direct)" so the Sources panel accounts for it rather than
-            // silently dropping it — but key visitorsMap by the raw "" value.
+            // silently dropping it.
             const dimValue =
               rawDimValue === "" && dimension === "referrer" ? "(direct)" : rawDimValue;
             if (!dimValue) continue; // skip empty dimension values for other dims
-            const visitors = visitorsMap.get(rawDimValue) ?? 0;
+            const visitors = Math.round(Number(row.visitors) || 0);
             batch.push(
               upsertStmt.bind(
                 site.id,
