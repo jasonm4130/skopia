@@ -123,3 +123,39 @@ describe("SiteLive.flush", () => {
     });
   });
 });
+
+describe("SiteLive day rollover", () => {
+  it("flushes the old day, resets seen, and clears pending on rollover", async () => {
+    const stub = stubFor("roll-1");
+    const day1 = "2026-06-28";
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        maybeRollover(newDay: string): Promise<void>;
+        pending: Map<string, unknown>;
+        currentDay: string | null;
+        siteId: string | null;
+        ctx: { storage: { sql: { exec(q: string, ...b: unknown[]): { one(): { c: number } } } } };
+      };
+      // Seed "yesterday" by recording then forcing currentDay back to day1.
+      await i.recordEvent(evt({ vid: "v1", path: "/old" }));
+      i.currentDay = day1;
+      i.siteId = "do-site";
+
+      await i.maybeRollover("2026-06-29"); // cross midnight
+
+      // old day flushed to shadow
+      // pending cleared, seen emptied
+      expect(i.pending.size).toBe(0);
+      const seenCount = i.ctx.storage.sql.exec("SELECT COUNT(*) AS c FROM seen").one().c;
+      expect(seenCount).toBe(0);
+    });
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+    )
+      .bind("do-site", day1)
+      .first<{ pageviews: number }>();
+    expect(row?.pageviews).toBe(1); // the day1 pageview was flushed under day1
+  });
+});

@@ -175,9 +175,14 @@ export class SiteLive extends DurableObject<Env> {
     return Number(row.c);
   }
 
-  /** Day-rollover hook — implemented in Task 4. */
-  private async maybeRollover(_newDay: string): Promise<void> {
-    // no-op until Task 4
+  /** On a UTC day change: flush the old day, reset the seen set, clear pending. */
+  private async maybeRollover(newDay: string): Promise<void> {
+    if (this.currentDay !== null && this.currentDay !== newDay) {
+      await this.flush(); // flushes under the OLD this.currentDay
+      this.ctx.storage.sql.exec("DROP TABLE IF EXISTS seen"); // not DELETE — no per-row writes
+      this.ctx.storage.sql.exec(SEEN_DDL);
+      this.pending.clear();
+    }
   }
 
   private handleLiveWs(request: Request): Response {
