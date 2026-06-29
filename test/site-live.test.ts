@@ -1,7 +1,12 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { CountEvent } from "../src/dashboard/event-dimensions";
+import { utcDay } from "../src/shared/identity";
 import { applyMigrations } from "./apply-migrations";
+
+function utcDayUTC(): string {
+  return utcDay(new Date());
+}
 
 beforeAll(async () => {
   await applyMigrations();
@@ -75,6 +80,46 @@ describe("SiteLive.recordEvent", () => {
       const ev = [...i.pending.values()].find((p) => p.dimension === "event");
       expect(total?.delta).toBe(0); // not a pageview
       expect(ev?.delta).toBe(1); // event counted
+    });
+  });
+});
+
+describe("SiteLive.flush", () => {
+  it("upserts pageviews additively and visitors absolutely from seen", async () => {
+    const stub = stubFor("flush-1");
+    const day = utcDayUTC();
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        flush(): Promise<void>;
+      };
+      await i.recordEvent(evt({ vid: "v1", path: "/p" }));
+      await i.recordEvent(evt({ vid: "v2", path: "/p" }));
+      await i.flush(); // pageviews 2, visitors 2 for page:/p
+      await i.recordEvent(evt({ vid: "v1", path: "/p" })); // returning visitor, +1 pv
+      await i.flush(); // pageviews 3 total, visitors still 2
+    });
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
+    )
+      .bind("do-site", day)
+      .first<{ pageviews: number; visitors: number }>();
+    expect(row?.pageviews).toBe(3); // additive across two flushes
+    expect(row?.visitors).toBe(2); // absolute from seen, no double-count
+  });
+
+  it("clears pending after a successful flush (second flush is a no-op)", async () => {
+    const stub = stubFor("flush-2");
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        flush(): Promise<void>;
+        pending: Map<string, unknown>;
+      };
+      await i.recordEvent(evt({ vid: "v1" }));
+      await i.flush();
+      expect(i.pending.size).toBe(0);
     });
   });
 });

@@ -28,6 +28,19 @@ const SEEN_DDL = `CREATE TABLE IF NOT EXISTS seen (
   PRIMARY KEY (day, dimension, dim_value, vid)
 ) WITHOUT ROWID`;
 
+/** Phase 1 writes the shadow table; Phase 2 flips this to "rollup_daily". */
+const FLUSH_TABLE = "rollup_daily_shadow";
+
+const FLUSH_UPSERT = `
+INSERT INTO ${FLUSH_TABLE} (site_id, day, dimension, dim_value, pageviews, visitors, sampled)
+VALUES (?, ?, ?, ?, ?, ?, 0)
+ON CONFLICT(site_id, day, dimension, dim_value)
+DO UPDATE SET
+  pageviews = ${FLUSH_TABLE}.pageviews + excluded.pageviews,
+  visitors  = excluded.visitors,
+  sampled   = 0
+`.trim();
+
 /** RAM pending key: dimension + \u0001 + dim_value (NEVER \x00). */
 function pendingKey(dimension: string, dimValue: string): string {
   return `${dimension}\u0001${dimValue}`;
@@ -123,6 +136,43 @@ export class SiteLive extends DurableObject<Env> {
         e.vid,
       );
     }
+  }
+
+  /** Flush dirty counters to D1 (spec §6). Pageviews add; visitors are exact. */
+  async flush(): Promise<void> {
+    if (this.siteId === null || this.currentDay === null || this.pending.size === 0) return;
+    const day = this.currentDay;
+    const site = this.siteId;
+
+    const stmts = [];
+    for (const { dimension, dimValue, delta } of this.pending.values()) {
+      const visitors = this.countSeen(day, dimension, dimValue);
+      stmts.push(
+        this.env.DB.prepare(FLUSH_UPSERT).bind(site, day, dimension, dimValue, delta, visitors),
+      );
+    }
+
+    try {
+      for (let i = 0; i < stmts.length; i += 100) {
+        await this.env.DB.batch(stmts.slice(i, i + 100));
+      }
+      this.pending.clear(); // only on success — otherwise retry next alarm
+    } catch {
+      // Leave pending intact; the next flush retries. WAE still holds the raw events.
+    }
+  }
+
+  /** Exact distinct visitors for a (day, dimension, value) from the durable set. */
+  private countSeen(day: string, dimension: string, dimValue: string): number {
+    const row = this.ctx.storage.sql
+      .exec(
+        "SELECT COUNT(*) AS c FROM seen WHERE day = ? AND dimension = ? AND dim_value = ?",
+        day,
+        dimension,
+        dimValue,
+      )
+      .one();
+    return Number(row.c);
   }
 
   /** Day-rollover hook — implemented in Task 4. */
