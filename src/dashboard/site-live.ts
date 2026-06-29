@@ -9,13 +9,42 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { BreakdownRow, Env, LiveSnapshot } from "../shared/types";
+import { utcDay } from "../shared/identity";
+import type { BreakdownRow, Env, LiveSnapshot, RollupDimension } from "../shared/types";
+import { type CountEvent, eventDimensions } from "./event-dimensions";
 
 /** TTL for a visitor in the live map: 5 minutes in ms. */
 const VISITOR_TTL_MS = 5 * 60 * 1000;
 
-/** Alarm tick interval: 30 seconds. */
-const ALARM_INTERVAL_MS = 30_000;
+/** Alarm tick interval: 15 seconds — flush + live-eviction (spec §6). */
+const ALARM_INTERVAL_MS = 15_000;
+
+/** Durable distinct-visitor set. WITHOUT ROWID => PK insert is 1 row written. */
+const SEEN_DDL = `CREATE TABLE IF NOT EXISTS seen (
+  day        TEXT NOT NULL,
+  dimension  TEXT NOT NULL,
+  dim_value  TEXT NOT NULL,
+  vid        TEXT NOT NULL,
+  PRIMARY KEY (day, dimension, dim_value, vid)
+) WITHOUT ROWID`;
+
+/** Phase 1 writes the shadow table; Phase 2 flips this to "rollup_daily". */
+const FLUSH_TABLE = "rollup_daily_shadow";
+
+const FLUSH_UPSERT = `
+INSERT INTO ${FLUSH_TABLE} (site_id, day, dimension, dim_value, pageviews, visitors, sampled)
+VALUES (?, ?, ?, ?, ?, ?, 0)
+ON CONFLICT(site_id, day, dimension, dim_value)
+DO UPDATE SET
+  pageviews = ${FLUSH_TABLE}.pageviews + excluded.pageviews,
+  visitors  = excluded.visitors,
+  sampled   = 0
+`.trim();
+
+/** RAM pending key: dimension + \u0001 + dim_value (NEVER \x00). */
+function pendingKey(dimension: string, dimValue: string): string {
+  return `${dimension}\u0001${dimValue}`;
+}
 
 interface VisitorEntry {
   lastSeen: number;
@@ -23,19 +52,37 @@ interface VisitorEntry {
 }
 
 export class SiteLive extends DurableObject<Env> {
-  /** vid -> { lastSeen, path } */
+  /** vid -> { lastSeen, path } — live window (RAM, ephemeral by design). */
   private visitors = new Map<string, VisitorEntry>();
+
+  /** Per-(dimension,dim_value) pageview delta since the last flush + dirty set. */
+  private pending = new Map<
+    string,
+    { dimension: RollupDimension; dimValue: string; delta: number }
+  >();
+
+  /** UTC day the RAM state belongs to (rollover detection). */
+  private currentDay: string | null = null;
+
+  /** site_id, learned from the first event (needed for the D1 flush). */
+  private siteId: string | null = null;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Schema setup is synchronous; safe in the constructor for SQLite DOs.
+    this.ctx.storage.sql.exec(SEEN_DDL);
+  }
 
   /**
    * HTTP entry:
-   *   POST /hit  — collector bumps a vid via waitUntil
-   *   GET  /live — dashboard upgrades to WebSocket
+   *   POST /event — collector forwards enriched event (live map + rollup)
+   *   GET  /live  — dashboard upgrades to WebSocket
    */
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/hit") {
-      return this.handleHit(request);
+    if (url.pathname === "/event") {
+      return this.handleEvent(request);
     }
 
     if (url.pathname === "/live") {
@@ -45,24 +92,102 @@ export class SiteLive extends DurableObject<Env> {
     return new Response("Not found", { status: 404 });
   }
 
-  private async handleHit(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const vid = url.searchParams.get("vid") ?? "unknown";
-    const path = url.searchParams.get("path") ?? "/";
+  /** Collector hot path: live-map update + dimensional counting in one call. */
+  private async handleEvent(request: Request): Promise<Response> {
+    let e: CountEvent;
+    try {
+      e = (await request.json()) as CountEvent;
+    } catch {
+      return new Response("bad request", { status: 400 });
+    }
 
-    this.visitors.set(vid, { lastSeen: Date.now(), path });
+    // Live window: track visitor for the real-time dashboard.
+    this.visitors.set(e.vid, { lastSeen: Date.now(), path: e.path });
 
-    // Schedule alarm to evict stale entries (idempotent — only schedules if
-    // no alarm is already set for this DO).
+    // Dimensional counting (new).
+    await this.recordEvent(e);
+
+    // Arm the flush/evict alarm if none is pending (idempotent).
     const current = await this.ctx.storage.getAlarm();
     if (current === null) {
       await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
 
-    // Push updated snapshot to all connected dashboard WebSockets.
     this.broadcast();
-
     return new Response(null, { status: 204 });
+  }
+
+  /** Record one enriched event into RAM deltas + the durable seen set (spec §5). */
+  async recordEvent(e: CountEvent): Promise<void> {
+    this.siteId = e.siteId;
+    const day = utcDay(new Date());
+    await this.maybeRollover(day);
+    this.currentDay = day;
+
+    for (const c of eventDimensions(e)) {
+      const key = pendingKey(c.dimension, c.dimValue);
+      const cur = this.pending.get(key);
+      if (cur) {
+        cur.delta += c.pv;
+      } else {
+        this.pending.set(key, { dimension: c.dimension, dimValue: c.dimValue, delta: c.pv });
+      }
+      // INSERT OR IGNORE: a returning visitor is a no-op (0 rows written).
+      this.ctx.storage.sql.exec(
+        "INSERT OR IGNORE INTO seen (day, dimension, dim_value, vid) VALUES (?, ?, ?, ?)",
+        day,
+        c.dimension,
+        c.dimValue,
+        e.vid,
+      );
+    }
+  }
+
+  /** Flush dirty counters to D1 (spec §6). Pageviews add; visitors are exact. */
+  async flush(): Promise<void> {
+    if (this.siteId === null || this.currentDay === null || this.pending.size === 0) return;
+    const day = this.currentDay;
+    const site = this.siteId;
+
+    const stmts = [];
+    for (const { dimension, dimValue, delta } of this.pending.values()) {
+      const visitors = this.countSeen(day, dimension, dimValue);
+      stmts.push(
+        this.env.DB.prepare(FLUSH_UPSERT).bind(site, day, dimension, dimValue, delta, visitors),
+      );
+    }
+
+    try {
+      for (let i = 0; i < stmts.length; i += 100) {
+        await this.env.DB.batch(stmts.slice(i, i + 100));
+      }
+      this.pending.clear(); // only on success — otherwise retry next alarm
+    } catch {
+      // Leave pending intact; the next flush retries. WAE still holds the raw events.
+    }
+  }
+
+  /** Exact distinct visitors for a (day, dimension, value) from the durable set. */
+  private countSeen(day: string, dimension: string, dimValue: string): number {
+    const row = this.ctx.storage.sql
+      .exec(
+        "SELECT COUNT(*) AS c FROM seen WHERE day = ? AND dimension = ? AND dim_value = ?",
+        day,
+        dimension,
+        dimValue,
+      )
+      .one();
+    return Number(row.c);
+  }
+
+  /** On a UTC day change: flush the old day, reset the seen set, clear pending. */
+  private async maybeRollover(newDay: string): Promise<void> {
+    if (this.currentDay !== null && this.currentDay !== newDay) {
+      await this.flush(); // flushes under the OLD this.currentDay
+      this.ctx.storage.sql.exec("DROP TABLE IF EXISTS seen"); // not DELETE — no per-row writes
+      this.ctx.storage.sql.exec(SEEN_DDL);
+      this.pending.clear();
+    }
   }
 
   private handleLiveWs(request: Request): Response {
@@ -120,24 +245,22 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
-  /** Eviction tick: drop visitors not seen in the last 5 minutes (spec §6). */
+  /** Tick: flush counters, then evict stale live visitors (spec §6). */
   override async alarm(): Promise<void> {
+    await this.flush();
+
     const cutoff = Date.now() - VISITOR_TTL_MS;
     let evicted = false;
-
     for (const [vid, entry] of this.visitors) {
       if (entry.lastSeen < cutoff) {
         this.visitors.delete(vid);
         evicted = true;
       }
     }
+    if (evicted) this.broadcast();
 
-    if (evicted) {
-      this.broadcast();
-    }
-
-    // Reschedule only while there are still live visitors to watch.
-    if (this.visitors.size > 0) {
+    // Reschedule while there is live activity or counters still to flush.
+    if (this.visitors.size > 0 || this.pending.size > 0) {
       await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
   }

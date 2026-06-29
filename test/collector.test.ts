@@ -417,5 +417,17 @@ describe("handleCollect — SiteLive DO bump", () => {
     // With the body-vs-query-param bug both visitors collapse to "unknown" → 1.
     // Correctly wired, the two distinct vids yield 2.
     expect(count).toBe(2);
+
+    // The same /event calls also feed the incremental rollup. Fire the DO alarm
+    // to flush, then the shadow table must hold the two pageviews.
+    const { runDurableObjectAlarm } = await import("cloudflare:test");
+    await runDurableObjectAlarm(stub);
+    const shadow = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND dimension='total'",
+    )
+      .bind("live-site")
+      .first<{ pageviews: number; visitors: number }>();
+    expect(shadow?.pageviews).toBe(2);
+    expect(shadow?.visitors).toBe(2);
   });
 });
