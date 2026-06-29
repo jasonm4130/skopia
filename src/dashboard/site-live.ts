@@ -81,6 +81,10 @@ export class SiteLive extends DurableObject<Env> {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === "/event") {
+      return this.handleEvent(request);
+    }
+
     if (url.pathname === "/hit") {
       return this.handleHit(request);
     }
@@ -109,6 +113,31 @@ export class SiteLive extends DurableObject<Env> {
     // Push updated snapshot to all connected dashboard WebSockets.
     this.broadcast();
 
+    return new Response(null, { status: 204 });
+  }
+
+  /** Collector hot path: live-map update + dimensional counting in one call. */
+  private async handleEvent(request: Request): Promise<Response> {
+    let e: CountEvent;
+    try {
+      e = (await request.json()) as CountEvent;
+    } catch {
+      return new Response("bad request", { status: 400 });
+    }
+
+    // Live window (same behaviour the old /hit had).
+    this.visitors.set(e.vid, { lastSeen: Date.now(), path: e.path });
+
+    // Dimensional counting (new).
+    await this.recordEvent(e);
+
+    // Arm the flush/evict alarm if none is pending (idempotent).
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null) {
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    }
+
+    this.broadcast();
     return new Response(null, { status: 204 });
   }
 
@@ -240,24 +269,22 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
-  /** Eviction tick: drop visitors not seen in the last 5 minutes (spec §6). */
+  /** Tick: flush counters, then evict stale live visitors (spec §6). */
   override async alarm(): Promise<void> {
+    await this.flush();
+
     const cutoff = Date.now() - VISITOR_TTL_MS;
     let evicted = false;
-
     for (const [vid, entry] of this.visitors) {
       if (entry.lastSeen < cutoff) {
         this.visitors.delete(vid);
         evicted = true;
       }
     }
+    if (evicted) this.broadcast();
 
-    if (evicted) {
-      this.broadcast();
-    }
-
-    // Reschedule only while there are still live visitors to watch.
-    if (this.visitors.size > 0) {
+    // Reschedule while there is live activity or counters still to flush.
+    if (this.visitors.size > 0 || this.pending.size > 0) {
       await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
   }

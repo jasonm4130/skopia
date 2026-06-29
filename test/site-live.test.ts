@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { CountEvent } from "../src/dashboard/event-dimensions";
 import { utcDay } from "../src/shared/identity";
@@ -157,5 +157,48 @@ describe("SiteLive day rollover", () => {
       .bind("do-site", day1)
       .first<{ pageviews: number }>();
     expect(row?.pageviews).toBe(1); // the day1 pageview was flushed under day1
+  });
+});
+
+describe("SiteLive /event + alarm", () => {
+  it("POST /event updates the live map and records counters in one call", async () => {
+    const stub = stubFor("ev-1");
+    const body = JSON.stringify(evt({ vid: "v1", path: "/home" }));
+    const res = await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    expect(res.status).toBe(204);
+
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        visitors: Map<string, unknown>;
+        pending: Map<string, unknown>;
+      };
+      expect(i.visitors.size).toBe(1); // live map updated
+      expect(i.pending.size).toBeGreaterThan(0); // counters recorded
+    });
+  });
+
+  it("alarm flushes pending counters to the shadow table", async () => {
+    const stub = stubFor("ev-2");
+    const day = utcDayUTC();
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Distinct site_id: rollup_daily_shadow is a shared D1 table and the
+      // flush UPSERT is additive, so reusing "do-site" would accumulate other
+      // tests' pageviews into this row. A per-test site_id isolates the assert.
+      body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: "ev2-site" })),
+    });
+    await runDurableObjectAlarm(stub); // fire the scheduled flush+evict tick
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+    )
+      .bind("ev2-site", day)
+      .first<{ pageviews: number }>();
+    expect(row?.pageviews).toBe(1);
   });
 });

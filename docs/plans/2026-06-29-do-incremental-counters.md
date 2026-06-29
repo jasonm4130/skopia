@@ -759,14 +759,17 @@ describe("SiteLive /event + alarm", () => {
     await stub.fetch("https://do-internal/event", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(evt({ vid: "v1", path: "/a" })),
+      // Distinct site_id: rollup_daily_shadow is a shared D1 table and the flush
+      // UPSERT is additive, so reusing "do-site" would accumulate other tests'
+      // pageviews into this row. A per-test site_id isolates the assertion.
+      body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: "ev2-site" })),
     });
     await runDurableObjectAlarm(stub); // fire the scheduled flush+evict tick
 
     const row = await env.DB.prepare(
       "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
     )
-      .bind("do-site", day)
+      .bind("ev2-site", day)
       .first<{ pageviews: number }>();
     expect(row?.pageviews).toBe(1);
   });
