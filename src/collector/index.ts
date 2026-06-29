@@ -234,17 +234,37 @@ export async function handleCollect(
   env.WAE.writeDataPoint(toDataPoint(waeEvent));
 
   // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
+  // One DO call per event drives BOTH the live count and the dimensional rollup
+  // (spec §3). The DO reads a JSON body — query-string params are not used.
   const doId = env.SITE_LIVE.idFromName(siteId);
   const doStub = env.SITE_LIVE.get(doId);
-  // handleHit reads vid/path from the query string, so they must go in the URL
-  // (a JSON body is ignored — that collapsed every visitor to "unknown").
-  const hitUrl = `https://do-internal/hit?vid=${encodeURIComponent(vid)}&path=${encodeURIComponent(
-    beacon.p ?? "/",
-  )}`;
+  const eventBody = JSON.stringify({
+    siteId,
+    vid,
+    isPageview,
+    path: beacon.p ?? "/",
+    referrer: referrerHost,
+    utmSource: utm.source,
+    utmMedium: utm.medium,
+    utmCampaign: utm.campaign,
+    country: cf.country,
+    device: deviceClass,
+    browser: uaInfo.browser,
+    os: uaInfo.os,
+    eventName: beacon.n ?? "",
+  });
   ctx.waitUntil(
-    doStub.fetch(new Request(hitUrl, { method: "POST" })).catch(() => {
-      // DO is best-effort; don't let failures kill the beacon response
-    }),
+    doStub
+      .fetch(
+        new Request("https://do-internal/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: eventBody,
+        }),
+      )
+      .catch(() => {
+        // DO is best-effort; WAE already holds the durable copy.
+      }),
   );
 
   // ---------- 14. Respond 204 ----------

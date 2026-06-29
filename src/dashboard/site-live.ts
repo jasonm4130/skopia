@@ -75,8 +75,8 @@ export class SiteLive extends DurableObject<Env> {
 
   /**
    * HTTP entry:
-   *   POST /hit  — collector bumps a vid via waitUntil
-   *   GET  /live — dashboard upgrades to WebSocket
+   *   POST /event — collector forwards enriched event (live map + rollup)
+   *   GET  /live  — dashboard upgrades to WebSocket
    */
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -85,35 +85,11 @@ export class SiteLive extends DurableObject<Env> {
       return this.handleEvent(request);
     }
 
-    if (url.pathname === "/hit") {
-      return this.handleHit(request);
-    }
-
     if (url.pathname === "/live") {
       return this.handleLiveWs(request);
     }
 
     return new Response("Not found", { status: 404 });
-  }
-
-  private async handleHit(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const vid = url.searchParams.get("vid") ?? "unknown";
-    const path = url.searchParams.get("path") ?? "/";
-
-    this.visitors.set(vid, { lastSeen: Date.now(), path });
-
-    // Schedule alarm to evict stale entries (idempotent — only schedules if
-    // no alarm is already set for this DO).
-    const current = await this.ctx.storage.getAlarm();
-    if (current === null) {
-      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
-    }
-
-    // Push updated snapshot to all connected dashboard WebSockets.
-    this.broadcast();
-
-    return new Response(null, { status: 204 });
   }
 
   /** Collector hot path: live-map update + dimensional counting in one call. */
@@ -125,7 +101,7 @@ export class SiteLive extends DurableObject<Env> {
       return new Response("bad request", { status: 400 });
     }
 
-    // Live window (same behaviour the old /hit had).
+    // Live window: track visitor for the real-time dashboard.
     this.visitors.set(e.vid, { lastSeen: Date.now(), path: e.path });
 
     // Dimensional counting (new).
