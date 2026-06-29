@@ -9,13 +9,29 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { BreakdownRow, Env, LiveSnapshot } from "../shared/types";
+import { utcDay } from "../shared/identity";
+import type { BreakdownRow, Env, LiveSnapshot, RollupDimension } from "../shared/types";
+import { type CountEvent, eventDimensions } from "./event-dimensions";
 
 /** TTL for a visitor in the live map: 5 minutes in ms. */
 const VISITOR_TTL_MS = 5 * 60 * 1000;
 
-/** Alarm tick interval: 30 seconds. */
-const ALARM_INTERVAL_MS = 30_000;
+/** Alarm tick interval: 15 seconds — flush + live-eviction (spec §6). */
+const ALARM_INTERVAL_MS = 15_000;
+
+/** Durable distinct-visitor set. WITHOUT ROWID => PK insert is 1 row written. */
+const SEEN_DDL = `CREATE TABLE IF NOT EXISTS seen (
+  day        TEXT NOT NULL,
+  dimension  TEXT NOT NULL,
+  dim_value  TEXT NOT NULL,
+  vid        TEXT NOT NULL,
+  PRIMARY KEY (day, dimension, dim_value, vid)
+) WITHOUT ROWID`;
+
+/** RAM pending key: dimension + \u0001 + dim_value (NEVER \x00). */
+function pendingKey(dimension: string, dimValue: string): string {
+  return `${dimension}\u0001${dimValue}`;
+}
 
 interface VisitorEntry {
   lastSeen: number;
@@ -23,8 +39,26 @@ interface VisitorEntry {
 }
 
 export class SiteLive extends DurableObject<Env> {
-  /** vid -> { lastSeen, path } */
+  /** vid -> { lastSeen, path } — live window (RAM, ephemeral by design). */
   private visitors = new Map<string, VisitorEntry>();
+
+  /** Per-(dimension,dim_value) pageview delta since the last flush + dirty set. */
+  private pending = new Map<
+    string,
+    { dimension: RollupDimension; dimValue: string; delta: number }
+  >();
+
+  /** UTC day the RAM state belongs to (rollover detection). */
+  private currentDay: string | null = null;
+
+  /** site_id, learned from the first event (needed for the D1 flush). */
+  private siteId: string | null = null;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Schema setup is synchronous; safe in the constructor for SQLite DOs.
+    this.ctx.storage.sql.exec(SEEN_DDL);
+  }
 
   /**
    * HTTP entry:
@@ -63,6 +97,37 @@ export class SiteLive extends DurableObject<Env> {
     this.broadcast();
 
     return new Response(null, { status: 204 });
+  }
+
+  /** Record one enriched event into RAM deltas + the durable seen set (spec §5). */
+  async recordEvent(e: CountEvent): Promise<void> {
+    this.siteId = e.siteId;
+    const day = utcDay(new Date());
+    await this.maybeRollover(day);
+    this.currentDay = day;
+
+    for (const c of eventDimensions(e)) {
+      const key = pendingKey(c.dimension, c.dimValue);
+      const cur = this.pending.get(key);
+      if (cur) {
+        cur.delta += c.pv;
+      } else {
+        this.pending.set(key, { dimension: c.dimension, dimValue: c.dimValue, delta: c.pv });
+      }
+      // INSERT OR IGNORE: a returning visitor is a no-op (0 rows written).
+      this.ctx.storage.sql.exec(
+        "INSERT OR IGNORE INTO seen (day, dimension, dim_value, vid) VALUES (?, ?, ?, ?)",
+        day,
+        c.dimension,
+        c.dimValue,
+        e.vid,
+      );
+    }
+  }
+
+  /** Day-rollover hook — implemented in Task 4. */
+  private async maybeRollover(_newDay: string): Promise<void> {
+    // no-op until Task 4
   }
 
   private handleLiveWs(request: Request): Response {
