@@ -28,6 +28,13 @@ write to durable storage on the per-event hot path** — accumulate in RAM, flus
 Per-event durable writes amplify ~14× and would cost ~$1,365/mo at 100M pageviews; the
 write-back pattern keeps it flat at ~$20–50/mo.
 
+> **Amended by [ADR-0010](../decisions/0010-do-pending-durability.md) (2026-07-01):** this
+> rule was too strong. RAM-only counters were discarded when the DO slept via the
+> Hibernation API (~10s) before the 15s flush alarm, badly under-counting pageviews in the
+> Phase-1 parity run. The revised rule: never write a *per-dimension* counter per event (the
+> ~14× amplification above), but *exactly one* fixed durable `flushstate` blob write per
+> event **is** required for correctness — one row-write/event, ~$15/mo added at 20M events.
+
 ---
 
 ## 1. Motivation

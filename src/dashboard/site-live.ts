@@ -51,15 +51,34 @@ interface VisitorEntry {
   path: string;
 }
 
+/** One pending bucket: a (dimension, dim_value)'s un-flushed pageview delta. */
+interface PendingRow {
+  dimension: RollupDimension;
+  dimValue: string;
+  delta: number;
+}
+
+/**
+ * Durable snapshot of everything flush() needs. Persisted on every event so the
+ * counters survive a Hibernation-API sleep / eviction / deploy that discards RAM
+ * (ADR-0010). Before this, un-flushed deltas were lost when the DO slept (~10s)
+ * before the 15s flush alarm, so pageviews were badly under-counted.
+ */
+interface FlushState {
+  siteId: string | null;
+  currentDay: string | null;
+  pending: Map<string, PendingRow>;
+}
+
+/** Durable storage key for the serialized FlushState (one row, rewritten/event). */
+const FLUSH_STATE_KEY = "flushstate";
+
 export class SiteLive extends DurableObject<Env> {
   /** vid -> { lastSeen, path } — live window (RAM, ephemeral by design). */
   private visitors = new Map<string, VisitorEntry>();
 
   /** Per-(dimension,dim_value) pageview delta since the last flush + dirty set. */
-  private pending = new Map<
-    string,
-    { dimension: RollupDimension; dimValue: string; delta: number }
-  >();
+  private pending = new Map<string, PendingRow>();
 
   /** UTC day the RAM state belongs to (rollover detection). */
   private currentDay: string | null = null;
@@ -71,6 +90,17 @@ export class SiteLive extends DurableObject<Env> {
     super(ctx, env);
     // Schema setup is synchronous; safe in the constructor for SQLite DOs.
     this.ctx.storage.sql.exec(SEEN_DDL);
+    // Rehydrate un-flushed counters from durable storage before any request or
+    // alarm runs, so a cold-started instance (post-hibernation) flushes the real
+    // deltas instead of an empty map (ADR-0010).
+    this.ctx.blockConcurrencyWhile(async () => {
+      await this.rehydrate();
+      // If we came back holding un-flushed work but no alarm is armed, arm one so
+      // the deltas still reach D1.
+      if (this.pending.size > 0 && (await this.ctx.storage.getAlarm()) === null) {
+        await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+      }
+    });
   }
 
   /**
@@ -141,6 +171,29 @@ export class SiteLive extends DurableObject<Env> {
         e.vid,
       );
     }
+
+    // Durably snapshot the counters so a hibernation before the next flush can't
+    // drop them (ADR-0010). One put per event, independent of dimension count.
+    await this.persistPending();
+  }
+
+  /** Reload the durable FlushState into RAM — the cold-start / construction path. */
+  private async rehydrate(): Promise<void> {
+    const s = await this.ctx.storage.get<FlushState>(FLUSH_STATE_KEY);
+    if (s) {
+      this.siteId = s.siteId;
+      this.currentDay = s.currentDay;
+      this.pending = s.pending;
+    }
+  }
+
+  /** Persist the current flush state as a single durable row (ADR-0010). */
+  private async persistPending(): Promise<void> {
+    await this.ctx.storage.put<FlushState>(FLUSH_STATE_KEY, {
+      siteId: this.siteId,
+      currentDay: this.currentDay,
+      pending: this.pending,
+    });
   }
 
   /** Flush dirty counters to D1 (spec §6). Pageviews add; visitors are exact. */
@@ -162,6 +215,9 @@ export class SiteLive extends DurableObject<Env> {
         await this.env.DB.batch(stmts.slice(i, i + 100));
       }
       this.pending.clear(); // only on success — otherwise retry next alarm
+      // Drop the durable snapshot too, so a post-flush cold start can't re-apply
+      // these now-committed deltas (the flush UPSERT is additive) — ADR-0010.
+      await this.ctx.storage.delete(FLUSH_STATE_KEY);
     } catch {
       // Leave pending intact; the next flush retries. WAE still holds the raw events.
     }
