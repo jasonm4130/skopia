@@ -202,3 +202,98 @@ describe("SiteLive /event + alarm", () => {
     expect(row?.pageviews).toBe(1);
   });
 });
+
+// Regression for the Phase-1 parity failure (ADR-0010): `pending`, `siteId` and
+// `currentDay` were RAM-only, so a Hibernation-API sleep (~10s) between the event
+// and the 15s flush alarm discarded un-flushed pageview deltas — the alarm then
+// cold-started an empty instance and flushed nothing. The fix persists the flush
+// state durably every event and rehydrates it on construction.
+describe("SiteLive durability across hibernation", () => {
+  it("persists flush state to durable storage on every event", async () => {
+    const stub = stubFor("dur-1");
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        ctx: { storage: { get(k: string): Promise<unknown> } };
+      };
+      await i.recordEvent(evt({ vid: "v1", path: "/a", siteId: "dur1-site" }));
+      const state = (await i.ctx.storage.get("flushstate")) as
+        | {
+            siteId: string;
+            currentDay: string;
+            pending: Map<string, { dimension: string; delta: number }>;
+          }
+        | undefined;
+      expect(state).toBeDefined();
+      expect(state?.siteId).toBe("dur1-site");
+      const total = [...(state?.pending.values() ?? [])].find((p) => p.dimension === "total");
+      expect(total?.delta).toBe(1);
+    });
+  });
+
+  it("rehydrates from durable storage after RAM loss and flushes the full count", async () => {
+    const stub = stubFor("dur-2");
+    const day = utcDayUTC();
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        rehydrate(): Promise<void>;
+        flush(): Promise<void>;
+        pending: Map<string, unknown>;
+        siteId: string | null;
+        currentDay: string | null;
+      };
+      await i.recordEvent(evt({ vid: "v1", path: "/p", siteId: "dur2-site" }));
+      await i.recordEvent(evt({ vid: "v2", path: "/p", siteId: "dur2-site" }));
+      // Simulate a Hibernation-API sleep: the runtime discards all in-memory state.
+      i.pending = new Map();
+      i.siteId = null;
+      i.currentDay = null;
+      // Cold start: the constructor's rehydration path restores from durable storage.
+      await i.rehydrate();
+      expect(i.pending.size).toBeGreaterThan(0);
+      expect(i.siteId).toBe("dur2-site");
+      await i.flush();
+    });
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
+    )
+      .bind("dur2-site", day)
+      .first<{ pageviews: number; visitors: number }>();
+    expect(row?.pageviews).toBe(2); // no lost pageviews
+    expect(row?.visitors).toBe(2);
+  });
+
+  it("clears durable flush state after flush so a re-rehydrated cold start does not double-count", async () => {
+    const stub = stubFor("dur-3");
+    const day = utcDayUTC();
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        recordEvent(e: CountEvent): Promise<void>;
+        rehydrate(): Promise<void>;
+        flush(): Promise<void>;
+        pending: Map<string, unknown>;
+        siteId: string | null;
+        currentDay: string | null;
+        ctx: { storage: { get(k: string): Promise<unknown> } };
+      };
+      await i.recordEvent(evt({ vid: "v1", path: "/p", siteId: "dur3-site" }));
+      await i.flush(); // writes pv=1, must also clear the durable flush state
+      expect(await i.ctx.storage.get("flushstate")).toBeUndefined();
+      // A later cold start must find nothing to re-flush.
+      i.pending = new Map();
+      i.siteId = null;
+      i.currentDay = null;
+      await i.rehydrate();
+      await i.flush(); // no-op — the durable state was cleared
+    });
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+    )
+      .bind("dur3-site", day)
+      .first<{ pageviews: number }>();
+    expect(row?.pageviews).toBe(1); // NOT 2 — the flushed delta was not re-applied
+  });
+});
