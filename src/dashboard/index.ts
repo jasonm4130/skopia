@@ -308,6 +308,21 @@ const BASE_CSS = `
   ::-webkit-scrollbar-thumb{background:#232838;border-radius:6px;}
   ::-webkit-scrollbar-track{background:transparent;}
   @keyframes skopiaPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  /* Mobile layout hooks — hidden on desktop; enabled in the @media block below. */
+  .mobile-tabbar{display:none;}
+  .mobile-only{display:none;}
+  .mobile-more summary::-webkit-details-marker{display:none;}
+  @media (max-width:768px){
+    .dash-sidebar{display:none!important;}
+    .mobile-only{display:flex!important;}
+    .mobile-tabbar{display:flex!important;position:fixed;left:0;right:0;bottom:0;z-index:50;align-items:stretch;justify-content:space-around;background:rgba(13,16,22,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid #1b1f29;padding:6px 4px calc(env(safe-area-inset-bottom,0px) + 8px);}
+    .dash-topbar{padding:14px 16px!important;flex-wrap:wrap!important;gap:12px!important;}
+    .dash-content{padding:16px 16px 84px!important;}
+    .stat-grid{grid-template-columns:repeat(2,1fr)!important;}
+    .breakdown-grid{grid-template-columns:1fr!important;}
+    .geo-layout{flex-direction:column!important;}
+    .geo-layout>div{flex:none!important;}
+  }
 `.trim();
 
 function htmlDoc(title: string, head: string, body: string, nonce: string): string {
@@ -345,6 +360,65 @@ const NAV_ITEMS = [
   { id: "geography", label: "Geography", href: "/app/geography" },
 ] as const;
 
+// Site switcher <select>. Shared by the desktop sidebar and the mobile top bar.
+// Change events are wired by class (`.js-site-switcher`) from the nonced script
+// in appLayout, so every instance works regardless of where it renders.
+function siteSwitcher(
+  sites: SiteRow[],
+  siteId: string,
+  rangeKey: string,
+  opts: { id?: string; extraStyle?: string } = {},
+): string {
+  const idAttr = opts.id ? ` id="${opts.id}"` : "";
+  const optionsHtml = sites
+    .map(
+      (s) =>
+        `<option value="${esc(s.id)}"${s.id === siteId ? " selected" : ""}>${esc(s.name)}</option>`,
+    )
+    .join("");
+  return `<select${idAttr} class="js-site-switcher" data-range="${esc(rangeKey)}" aria-label="Switch site" style="${opts.extraStyle ?? ""}width:100%;cursor:pointer;font-size:13px;color:#e8eaef;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;appearance:none;-webkit-appearance:none;">${optionsHtml}</select>`;
+}
+
+// Health/status block. Shared by the desktop sidebar footer and the mobile
+// "More" sheet.
+function healthStatus(extraStyle = ""): string {
+  return `<div style="${extraStyle}background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
+      <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">skopia · d1 ok</div>
+    </div>`;
+}
+
+// Fixed bottom tab bar — the mobile replacement for the sidebar. Hidden on
+// desktop via `.mobile-tabbar{display:none}` in BASE_CSS; shown by the
+// max-width:768px media query. First four items link the existing routes; the
+// "More" <details> sheet (no JS) surfaces the sidebar footer (health status).
+function mobileTabbar(activeView: string, siteId: string, rangeKey: string): string {
+  const shortLabels: Record<string, string> = {
+    overview: "Overview",
+    pages: "Pages",
+    sources: "Sources",
+    geography: "Geo",
+  };
+  const tabs = NAV_ITEMS.map(({ id, label, href }) => {
+    const active = activeView === id;
+    const fullHref = siteId
+      ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+      : `${href}?range=${esc(rangeKey)}`;
+    const color = active ? "#9fb4ff" : "#8b92a4";
+    const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
+    return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
+  }).join("\n");
+  return `<nav class="mobile-tabbar">
+    ${tabs}
+    <details class="mobile-more" style="flex:1;">
+      <summary style="list-style:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:#8b92a4;cursor:pointer;height:100%;"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #3a4150;"></span>More</summary>
+      <div style="position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 58px);background:#0d1016;border-top:1px solid #1b1f29;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);box-shadow:0 -14px 34px rgba(0,0,0,.5);">
+        ${healthStatus()}
+      </div>
+    </details>
+  </nav>`;
+}
+
 function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey: string): string {
   const navHtml = NAV_ITEMS.map(({ id, label, href }) => {
     const active = activeView === id;
@@ -367,25 +441,16 @@ function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey:
 
   // Site switcher: a <select> whose change event is wired by the nonced script
   // in appLayout (inline on* handlers are blocked by the strict CSP).
-  const optionsHtml = sites
-    .map(
-      (s) =>
-        `<option value="${esc(s.id)}"${s.id === siteId ? " selected" : ""}>${esc(s.name)}</option>`,
-    )
-    .join("");
-  const switcher = `<select id="skopia-site-switcher" data-range="${esc(rangeKey)}" aria-label="Switch site" style="width:100%;cursor:pointer;font-size:13px;color:#e8eaef;background:#161a23;border:1px solid #232838;border-radius:9px;padding:10px 11px;appearance:none;-webkit-appearance:none;">${optionsHtml}</select>`;
+  const switcher = siteSwitcher(sites, siteId, rangeKey, { id: "skopia-site-switcher" });
 
-  return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
+  return `<div class="dash-sidebar" style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
     <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
       ${skopiaLogo()}
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
     <div style="margin-bottom:24px;">${switcher}</div>
     ${navHtml}
-    <div style="margin-top:auto;background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
-      <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">skopia · d1 ok</div>
-    </div>
+    ${healthStatus("margin-top:auto;")}
   </div>`;
 }
 
@@ -402,25 +467,30 @@ function appLayout(
   // CSP (script-src 'self' 'nonce' 'strict-dynamic', no script-src-attr) blocks
   // inline on* handlers, so these must be attached from a nonced script.
   const navScript = `<script nonce="${nonce}">(function(){
-    var s=document.getElementById('skopia-site-switcher');
-    if(s){s.addEventListener('change',function(){location.href='/app?site='+encodeURIComponent(s.value)+'&range='+encodeURIComponent(s.getAttribute('data-range')||'30d');});}
+    var ss=document.querySelectorAll('.js-site-switcher');
+    ss.forEach(function(s){s.addEventListener('change',function(){location.href='/app?site='+encodeURIComponent(s.value)+'&range='+encodeURIComponent(s.getAttribute('data-range')||'30d');});});
     var r=document.querySelector('select[name="range"]');
     if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
   })();</script>`;
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
   ${sidebar(activeView, sites, site.id, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+    <div class="dash-topbar" style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+      <div class="mobile-only" style="flex-basis:100%;align-items:center;gap:10px;min-width:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex:none;">${skopiaLogo()}<span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#fff;">Skopia</span></div>
+        <div style="flex:1;min-width:0;">${siteSwitcher(sites, site.id, rangeKey)}</div>
+      </div>
       <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
         <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
         <span id="live-count">—</span> online now
       </div>
       ${headerRight}
     </div>
-    <div style="flex:1;overflow:auto;padding:28px 32px 40px;">
+    <div class="dash-content" style="flex:1;overflow:auto;padding:28px 32px 40px;">
       ${content}
     </div>
   </div>
+  ${mobileTabbar(activeView, site.id, rangeKey)}
   ${navScript}
 </div>`;
 }
@@ -488,7 +558,7 @@ function statCardsHtml(cards: StatCards, sampled: boolean): string {
     </div>`,
     )
     .join("\n");
-  return `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;">${cardsHtml}</div>`;
+  return `<div class="stat-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;">${cardsHtml}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,7 +1090,7 @@ dashboard.get("/public/:token", async (c) => {
   const content = `
     ${statCardsHtml(cards, cards.sampled)}
     ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+    <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       ${breakdownCard("Top pages", topPages, "#4d86ff")}
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
     </div>
@@ -1113,7 +1183,7 @@ dashboard.get("/app", async (c) => {
   const content = `
     ${statCardsHtml(cards, cards.sampled)}
     ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+    <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
       ${breakdownCard("Top pages", topPages, "#4d86ff")}
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
     </div>
@@ -1235,7 +1305,7 @@ dashboard.get("/app/geography", async (c) => {
 
   const content = `
     <link rel="stylesheet" href="/vendor/jsvectormap@1.6.0/jsvectormap.min.css">
-    <div style="display:flex;gap:14px;align-items:stretch;">
+    <div class="geo-layout" style="display:flex;gap:14px;align-items:stretch;">
       <div style="flex:1.7;min-width:0;background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#fff;">Visitors by country</div>
