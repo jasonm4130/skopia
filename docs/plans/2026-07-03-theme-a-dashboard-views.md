@@ -1,5 +1,10 @@
 # Theme A — "Complete the Dashboard" Implementation Plan
 
+> **STATUS: COMPLETE — executed 2026-07-03** via the SDD workflow (6/6 tasks, all reviews
+> pass, 0 fix rounds, Opus final review approve). Merged in PR #13 (`378a713`), deployed as
+> worker `871942fe`. Commits `d4fb0b1..bc80356` are the durable record; checkboxes below were
+> tracked in the (since-removed) execution worktree's ledger, not ticked here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Surface the four collected-but-invisible reporting dimensions (device/browser/OS, UTM campaigns, custom events, live top-pages) as dashboard views, and fix the `build-schema.mjs` bug that embeds only migration `0001` into the cold-account bootstrap.

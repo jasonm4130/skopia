@@ -46,3 +46,6 @@ docs/recaps/
 # Skopia foundation (node_modules, dist, .wrangler, coverage, *.log already
 # covered above; this entry is the wrangler-generated types file).
 worker-configuration.d.ts
+
+# Session handoff docs (local-only)
+/.claude/handoffs/

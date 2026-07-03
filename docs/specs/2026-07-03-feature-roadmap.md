@@ -157,6 +157,9 @@ and is safe now; Theme B builds the shared scaffolding and earns the announcemen
 the expensive, ADR-gated sessionization budget on the marquee.
 
 **Theme A — "Complete the dashboard" (ship now; reads-only; no ADR).**
+> **SHIPPED 2026-07-03** — PR #13, deployed worker `871942fe`. All four headline items live
+> (Devices, Campaigns, Events views + live top-pages panel), plus the `build-schema.mjs`
+> prerequisite fix. Plan: `docs/plans/2026-07-03-theme-a-dashboard-views.md`.
 Headline items: **Device/Browser/OS, UTM/campaigns, Custom-events views** (P0 #1–3) + **live
 top-pages panel** (#6). All are S, UI-only over the stable `rollup_daily`, and **safe before the
 Phase-2 cutover**. *Outcome:* the product finally shows everything it already collects — the
@@ -167,7 +170,8 @@ are invisible.*
 Headline items: **Site-management / settings admin UI** (P0 #4, the keystone), **in-dashboard
 snippet UX** (#5), **public-dashboard live** (#7), **data export / Stats API** (#8), **clean-account
 Deploy E2E + TTFD measurement** (#9), **marketing comparison pages** (#10). Prerequisite hygiene:
-fix `build-schema.mjs` (embeds only `0001`) before any table-adding feature (tech §5.4). *Also in
+fix `build-schema.mjs` (embeds only `0001`) before any table-adding feature (tech §5.4) —
+**done 2026-07-03** (shipped with Theme A, PR #13). *Also in
 this window: commission the sessionization ADR (#11) so Theme C isn't blocked on a cold start.*
 *Outcome:* self-host is completable in-browser (unlocks the Agency persona), the TTFD claim is
 measured, and the differentiation is legible on the marketing site.
