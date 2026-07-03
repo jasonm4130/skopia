@@ -81,6 +81,11 @@ const MOCK_UTM: BreakdownRow[] = [
   { label: "twitter", pageviews: 250, visitors: 200, share: 0.4, sampled: false },
 ];
 
+const MOCK_EVENTS: BreakdownRow[] = [
+  { label: "signup", pageviews: 42, visitors: 30, share: 0.02, sampled: false },
+  { label: "download", pageviews: 17, visitors: 15, share: 0.01, sampled: false },
+];
+
 vi.mock("../../src/db/queries", () => ({
   getOwner: vi.fn(),
   listSites: vi.fn(),
@@ -143,6 +148,7 @@ beforeEach(() => {
   vi.mocked(queries.getTopUtmSources).mockResolvedValue(MOCK_UTM);
   vi.mocked(queries.getTopUtmMediums).mockResolvedValue(MOCK_UTM);
   vi.mocked(queries.getTopUtmCampaigns).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopEvents).mockResolvedValue(MOCK_EVENTS);
 });
 
 // ---------------------------------------------------------------------------
@@ -613,5 +619,48 @@ describe("/app/campaigns", () => {
       req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(text).toContain('href="/app/campaigns?site=site-001&range=7d"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/events (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/events", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/events"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders the events table with honest Count column when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("signup");
+    expect(text).toContain("download");
+    // For dimension='event' the pageviews column counts fires, so the header
+    // must say Count, not Pageviews.
+    expect(text).toContain("Count");
+  });
+
+  it("shows instrument-it copy when there are no events", async () => {
+    vi.mocked(queries.getTopEvents).mockResolvedValue([]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain("No custom events in this period");
+    expect(text).toContain("skopia(&#39;event&#39;");
+  });
+
+  it("sidebar nav carries an Events link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/events?site=site-001&range=7d"');
   });
 });

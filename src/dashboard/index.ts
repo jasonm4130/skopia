@@ -27,6 +27,7 @@ import {
   getTopBrowsers,
   getTopCountries,
   getTopDevices,
+  getTopEvents,
   getTopOperatingSystems,
   getTopPages,
   getTopSources,
@@ -366,6 +367,7 @@ const NAV_ITEMS = [
   { id: "geography", label: "Geography", href: "/app/geography" },
   { id: "devices", label: "Devices", href: "/app/devices" },
   { id: "campaigns", label: "Campaigns", href: "/app/campaigns" },
+  { id: "events", label: "Events", href: "/app/events" },
 ] as const;
 
 // The mobile bottom bar fits 4 tabs + "More"; views past index 3 render as
@@ -1456,6 +1458,50 @@ dashboard.get("/app/campaigns", async (c) => {
       `Campaigns — ${site.name}`,
       "",
       appLayout("campaigns", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Custom events
+dashboard.get("/app/events", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const rows = await getTopEvents(c.env.DB, site.id, range, 50);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  // dimension='event' counts one "pageview" per fire (event-dimensions.ts),
+  // so the column is labeled Count — Pageviews would be a lie here.
+  const table =
+    rows.length === 0
+      ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
+      <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
+      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+    </div>`
+      : breakdownTable(
+          [
+            { label: "Event", key: "label", mono: true },
+            { label: "Count", key: "pageviews" },
+            { label: "Visitors", key: "visitors" },
+          ],
+          rows,
+        );
+
+  const content = table + liveScript(site.id, nonce);
+
+  return c.html(
+    htmlDoc(
+      `Events — ${site.name}`,
+      "",
+      appLayout("events", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
