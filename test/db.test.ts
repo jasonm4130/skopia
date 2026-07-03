@@ -18,6 +18,8 @@ import {
   getTimeSeries,
   getTopCountries,
   getTopPages,
+  getTopUtmCampaigns,
+  getTopUtmMediums,
   listGoals,
   listSites,
 } from "../src/db/queries";
@@ -63,6 +65,11 @@ beforeAll(async () => {
     ["site-a", "2026-06-19", "country", "US", 70, 55, 0],
     ["site-a", "2026-06-19", "country", "DE", 30, 25, 0],
     ["site-a", "2026-06-20", "country", "US", 100, 75, 0],
+    // utm dimensions
+    ["site-a", "2026-06-19", "utm_source", "newsletter", 40, 30, 0],
+    ["site-a", "2026-06-19", "utm_medium", "email", 40, 30, 0],
+    ["site-a", "2026-06-20", "utm_medium", "social", 10, 8, 0],
+    ["site-a", "2026-06-19", "utm_campaign", "launch-week", 25, 20, 0],
   ];
 
   const stmt = env.DB.prepare(
@@ -321,5 +328,38 @@ describe("getRealtimeCount", () => {
     const count = await getRealtimeCount(env.DB, "site-a");
     expect(typeof count).toBe("number");
     expect(count).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("getTopUtmMediums / getTopUtmCampaigns", () => {
+  it("returns the medium breakdown ordered by pageviews", async () => {
+    const rows = await getTopUtmMediums(
+      env.DB,
+      "site-a",
+      { from: "2026-06-19", to: "2026-06-21" },
+      10,
+    );
+    expect(rows[0]?.label).toBe("email"); // 40 pv > 10 pv
+    expect(rows.map((r) => r.label)).toContain("social");
+  });
+
+  it("returns the campaign breakdown", async () => {
+    const rows = await getTopUtmCampaigns(
+      env.DB,
+      "site-a",
+      { from: "2026-06-19", to: "2026-06-21" },
+      10,
+    );
+    expect(rows.map((r) => r.label)).toContain("launch-week");
+  });
+
+  it("returns empty array for a site with no UTM traffic", async () => {
+    const rows = await getTopUtmMediums(
+      env.DB,
+      "no-such-site",
+      { from: "2026-06-19", to: "2026-06-21" },
+      10,
+    );
+    expect(rows).toHaveLength(0);
   });
 });

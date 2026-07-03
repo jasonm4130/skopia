@@ -265,6 +265,26 @@ export async function getTopUtmSources(
   return getBreakdown(db, siteId, range, "utm_source", limit);
 }
 
+/** UTM-medium breakdown (dimension = "utm_medium"). */
+export async function getTopUtmMediums(
+  db: D1Database,
+  siteId: string,
+  range: DateRange,
+  limit: number,
+): Promise<BreakdownRow[]> {
+  return getBreakdown(db, siteId, range, "utm_medium", limit);
+}
+
+/** UTM-campaign breakdown (dimension = "utm_campaign"). */
+export async function getTopUtmCampaigns(
+  db: D1Database,
+  siteId: string,
+  range: DateRange,
+  limit: number,
+): Promise<BreakdownRow[]> {
+  return getBreakdown(db, siteId, range, "utm_campaign", limit);
+}
+
 /** Custom-event breakdown by event name (dimension = "event"). */
 export async function getTopEvents(
   db: D1Database,
