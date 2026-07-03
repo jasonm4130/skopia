@@ -76,6 +76,11 @@ const MOCK_DEVICES: BreakdownRow[] = [
   { label: "mobile", pageviews: 1200, visitors: 350, share: 0.3, sampled: false },
 ];
 
+const MOCK_UTM: BreakdownRow[] = [
+  { label: "newsletter", pageviews: 400, visitors: 300, share: 0.6, sampled: false },
+  { label: "twitter", pageviews: 250, visitors: 200, share: 0.4, sampled: false },
+];
+
 vi.mock("../../src/db/queries", () => ({
   getOwner: vi.fn(),
   listSites: vi.fn(),
@@ -90,6 +95,8 @@ vi.mock("../../src/db/queries", () => ({
   getTopBrowsers: vi.fn(),
   getTopOperatingSystems: vi.fn(),
   getTopUtmSources: vi.fn(),
+  getTopUtmMediums: vi.fn(),
+  getTopUtmCampaigns: vi.fn(),
   getTopEvents: vi.fn(),
   getBreakdown: vi.fn(),
   getOverview: vi.fn(),
@@ -133,6 +140,9 @@ beforeEach(() => {
   vi.mocked(queries.getTopDevices).mockResolvedValue(MOCK_DEVICES);
   vi.mocked(queries.getTopBrowsers).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopOperatingSystems).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopUtmSources).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmMediums).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmCampaigns).mockResolvedValue(MOCK_UTM);
 });
 
 // ---------------------------------------------------------------------------
@@ -571,5 +581,37 @@ describe("/app/devices", () => {
     expect(tabsSection).toContain(">Geo</a>");
     expect(tabsSection).not.toContain(">Devices</a>");
     expect(moreSection).toContain(">Devices</a>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/campaigns (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/campaigns", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/campaigns"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders UTM source, medium and campaign panels when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/campaigns", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("UTM source");
+    expect(text).toContain("UTM medium");
+    expect(text).toContain("UTM campaign");
+    expect(text).toContain("newsletter"); // MOCK_UTM row rendered
+  });
+
+  it("sidebar nav carries a Campaigns link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/campaigns?site=site-001&range=7d"');
   });
 });

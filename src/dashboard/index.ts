@@ -30,6 +30,9 @@ import {
   getTopOperatingSystems,
   getTopPages,
   getTopSources,
+  getTopUtmCampaigns,
+  getTopUtmMediums,
+  getTopUtmSources,
   listSites,
 } from "../db/queries";
 import { requireSecrets, SecretsMissingError } from "../shared/config";
@@ -362,6 +365,7 @@ const NAV_ITEMS = [
   { id: "sources", label: "Sources", href: "/app/sources" },
   { id: "geography", label: "Geography", href: "/app/geography" },
   { id: "devices", label: "Devices", href: "/app/devices" },
+  { id: "campaigns", label: "Campaigns", href: "/app/campaigns" },
 ] as const;
 
 // The mobile bottom bar fits 4 tabs + "More"; views past index 3 render as
@@ -1417,6 +1421,41 @@ dashboard.get("/app/devices", async (c) => {
       `Devices — ${site.name}`,
       "",
       appLayout("devices", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Campaigns (UTM)
+dashboard.get("/app/campaigns", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const [utmSources, utmMediums, utmCampaigns] = await Promise.all([
+    getTopUtmSources(c.env.DB, site.id, range, 10),
+    getTopUtmMediums(c.env.DB, site.id, range, 10),
+    getTopUtmCampaigns(c.env.DB, site.id, range, 10),
+  ]);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("UTM source", utmSources, "#4d86ff")}
+      ${breakdownCard("UTM medium", utmMediums, "#7a5cff")}
+      ${breakdownCard("UTM campaign", utmCampaigns, "#2bd888")}
+    </div>${liveScript(site.id, nonce)}`;
+
+  return c.html(
+    htmlDoc(
+      `Campaigns — ${site.name}`,
+      "",
+      appLayout("campaigns", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
