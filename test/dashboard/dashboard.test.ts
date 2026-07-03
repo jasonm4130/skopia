@@ -664,3 +664,39 @@ describe("/app/events", () => {
     expect(text).toContain('href="/app/events?site=site-001&range=7d"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Live top-pages panel (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("live top-pages panel", () => {
+  it("Overview renders the live-pages panel container", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain("Active pages right now");
+    expect(text).toContain('id="live-pages-list"');
+  });
+
+  it("live script consumes topPages and builds DOM safely (no innerHTML)", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const script = text.slice(text.indexOf("function connect()"));
+    expect(script).toContain("d.topPages");
+    // Paths are visitor-controlled input: rows must be built via
+    // createElement/textContent, never innerHTML string concatenation.
+    expect(script).toContain("textContent=p.label");
+    expect(script).not.toContain("innerHTML+=");
+  });
+
+  it("non-Overview pages do not render the panel (script no-ops via null check)", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).not.toContain('id="live-pages-list"');
+  });
+});

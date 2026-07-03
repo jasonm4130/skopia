@@ -840,6 +840,29 @@ function liveScript(siteId: string, nonce: string): string {
         var d=JSON.parse(e.data);
         var el=document.getElementById('live-count');
         if(el) el.textContent=d.visitors;
+        var list=document.getElementById('live-pages-list');
+        if(list&&Array.isArray(d.topPages)){
+          list.textContent='';
+          if(d.topPages.length===0){
+            var empty=document.createElement('span');
+            empty.style.cssText='color:#6a7184;font-size:13px;';
+            empty.textContent='No one online right now.';
+            list.appendChild(empty);
+          }
+          d.topPages.forEach(function(p){
+            var row=document.createElement('div');
+            row.style.cssText='display:flex;align-items:center;gap:11px;';
+            var label=document.createElement('span');
+            label.style.cssText="flex:1;font-size:12.5px;color:#cfd4e0;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+            label.textContent=p.label;
+            var count=document.createElement('span');
+            count.style.cssText='flex:none;font-size:12px;color:#9aa1b2;';
+            count.textContent=p.visitors;
+            row.appendChild(label);
+            row.appendChild(count);
+            list.appendChild(row);
+          });
+        }
       }catch(err){}
     };
     ws.onclose=function(){setTimeout(connect,3000);};
@@ -1217,6 +1240,15 @@ dashboard.get("/app", async (c) => {
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
     </div>
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
+    <div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;margin-top:14px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;">Active pages right now</span>
+      </div>
+      <div id="live-pages-list" style="display:flex;flex-direction:column;gap:13px;">
+        <span style="color:#6a7184;font-size:13px;">Waiting for live data&hellip;</span>
+      </div>
+    </div>
     ${liveScript(site.id, nonce)}
   `;
 
