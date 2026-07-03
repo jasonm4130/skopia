@@ -71,6 +71,21 @@ const MOCK_BREAKDOWN: BreakdownRow[] = [
   { label: "/pricing", pageviews: 2000, visitors: 400, share: 0.33, sampled: false },
 ];
 
+const MOCK_DEVICES: BreakdownRow[] = [
+  { label: "desktop", pageviews: 3000, visitors: 800, share: 0.7, sampled: false },
+  { label: "mobile", pageviews: 1200, visitors: 350, share: 0.3, sampled: false },
+];
+
+const MOCK_UTM: BreakdownRow[] = [
+  { label: "newsletter", pageviews: 400, visitors: 300, share: 0.6, sampled: false },
+  { label: "twitter", pageviews: 250, visitors: 200, share: 0.4, sampled: false },
+];
+
+const MOCK_EVENTS: BreakdownRow[] = [
+  { label: "signup", pageviews: 42, visitors: 30, share: 0.02, sampled: false },
+  { label: "download", pageviews: 17, visitors: 15, share: 0.01, sampled: false },
+];
+
 vi.mock("../../src/db/queries", () => ({
   getOwner: vi.fn(),
   listSites: vi.fn(),
@@ -85,6 +100,8 @@ vi.mock("../../src/db/queries", () => ({
   getTopBrowsers: vi.fn(),
   getTopOperatingSystems: vi.fn(),
   getTopUtmSources: vi.fn(),
+  getTopUtmMediums: vi.fn(),
+  getTopUtmCampaigns: vi.fn(),
   getTopEvents: vi.fn(),
   getBreakdown: vi.fn(),
   getOverview: vi.fn(),
@@ -125,6 +142,13 @@ beforeEach(() => {
   vi.mocked(queries.getTopPages).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopSources).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopCountries).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopDevices).mockResolvedValue(MOCK_DEVICES);
+  vi.mocked(queries.getTopBrowsers).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopOperatingSystems).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopUtmSources).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmMediums).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmCampaigns).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopEvents).mockResolvedValue(MOCK_EVENTS);
 });
 
 // ---------------------------------------------------------------------------
@@ -513,5 +537,166 @@ describe("/live", () => {
       }),
     );
     expect(res.status).toBe(426);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/devices (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/devices", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/devices"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders device, browser and OS panels when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/devices", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("Device type");
+    expect(text).toContain("Browser");
+    expect(text).toContain("Operating system");
+    expect(text).toContain("desktop"); // MOCK_DEVICES row rendered
+  });
+
+  it("sidebar nav carries a Devices link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/devices?site=site-001&range=7d"');
+  });
+
+  it("mobile tab bar keeps exactly 4 tabs; Devices lives in the More sheet", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // The tab bar renders the first four views as tabs only; overflow views
+    // render as full-label links inside the <details> More sheet — so Devices
+    // must appear after the <details> marker, not before it.
+    const tabbarStart = text.indexOf('class="mobile-tabbar"');
+    const moreStart = text.indexOf('<details class="mobile-more"', tabbarStart);
+    expect(moreStart).toBeGreaterThan(tabbarStart);
+    const tabsSection = text.slice(tabbarStart, moreStart);
+    const moreSection = text.slice(moreStart);
+    expect(tabsSection).toContain(">Geo</a>");
+    expect(tabsSection).not.toContain(">Devices</a>");
+    expect(moreSection).toContain(">Devices</a>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/campaigns (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/campaigns", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/campaigns"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders UTM source, medium and campaign panels when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/campaigns", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("UTM source");
+    expect(text).toContain("UTM medium");
+    expect(text).toContain("UTM campaign");
+    expect(text).toContain("newsletter"); // MOCK_UTM row rendered
+  });
+
+  it("sidebar nav carries a Campaigns link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/campaigns?site=site-001&range=7d"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/events (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/events", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/events"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders the events table with honest Count column when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("signup");
+    expect(text).toContain("download");
+    // For dimension='event' the pageviews column counts fires, so the header
+    // must say Count, not Pageviews.
+    expect(text).toContain("Count");
+  });
+
+  it("shows instrument-it copy when there are no events", async () => {
+    vi.mocked(queries.getTopEvents).mockResolvedValue([]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain("No custom events in this period");
+    expect(text).toContain("skopia(&#39;event&#39;");
+  });
+
+  it("sidebar nav carries an Events link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/events?site=site-001&range=7d"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live top-pages panel (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("live top-pages panel", () => {
+  it("Overview renders the live-pages panel container", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain("Active pages right now");
+    expect(text).toContain('id="live-pages-list"');
+  });
+
+  it("live script consumes topPages and builds DOM safely (no innerHTML)", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const script = text.slice(text.indexOf("function connect()"));
+    expect(script).toContain("d.topPages");
+    // Paths are visitor-controlled input: rows must be built via
+    // createElement/textContent, never innerHTML string concatenation.
+    expect(script).toContain("textContent=p.label");
+    expect(script).not.toContain("innerHTML+=");
+  });
+
+  it("non-Overview pages do not render the panel (script no-ops via null check)", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).not.toContain('id="live-pages-list"');
   });
 });

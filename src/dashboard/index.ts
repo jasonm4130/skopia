@@ -24,9 +24,16 @@ import {
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
+  getTopBrowsers,
   getTopCountries,
+  getTopDevices,
+  getTopEvents,
+  getTopOperatingSystems,
   getTopPages,
   getTopSources,
+  getTopUtmCampaigns,
+  getTopUtmMediums,
+  getTopUtmSources,
   listSites,
 } from "../db/queries";
 import { requireSecrets, SecretsMissingError } from "../shared/config";
@@ -358,7 +365,14 @@ const NAV_ITEMS = [
   { id: "pages", label: "Pages", href: "/app/pages" },
   { id: "sources", label: "Sources", href: "/app/sources" },
   { id: "geography", label: "Geography", href: "/app/geography" },
+  { id: "devices", label: "Devices", href: "/app/devices" },
+  { id: "campaigns", label: "Campaigns", href: "/app/campaigns" },
+  { id: "events", label: "Events", href: "/app/events" },
 ] as const;
+
+// The mobile bottom bar fits 4 tabs + "More"; views past index 3 render as
+// links inside the More sheet instead of tabs.
+const MOBILE_TAB_COUNT = 4;
 
 // Site switcher <select>. Shared by the desktop sidebar and the mobile top bar.
 // Change events are wired by class (`.js-site-switcher`) from the nonced script
@@ -399,20 +413,35 @@ function mobileTabbar(activeView: string, siteId: string, rangeKey: string): str
     sources: "Sources",
     geography: "Geo",
   };
-  const tabs = NAV_ITEMS.map(({ id, label, href }) => {
-    const active = activeView === id;
-    const fullHref = siteId
-      ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
-      : `${href}?range=${esc(rangeKey)}`;
-    const color = active ? "#9fb4ff" : "#8b92a4";
-    const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
-    return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
-  }).join("\n");
+  const tabs = NAV_ITEMS.slice(0, MOBILE_TAB_COUNT)
+    .map(({ id, label, href }) => {
+      const active = activeView === id;
+      const fullHref = siteId
+        ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+        : `${href}?range=${esc(rangeKey)}`;
+      const color = active ? "#9fb4ff" : "#8b92a4";
+      const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
+      return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
+    })
+    .join("\n");
+
+  // Views past MOBILE_TAB_COUNT render as full-label links in the More sheet.
+  const moreLinks = NAV_ITEMS.slice(MOBILE_TAB_COUNT)
+    .map(({ id, label, href }) => {
+      const active = activeView === id;
+      const fullHref = siteId
+        ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+        : `${href}?range=${esc(rangeKey)}`;
+      return `<a href="${fullHref}" style="display:block;padding:12px 4px;font-size:14px;color:${active ? "#9fb4ff" : "#cfd4e0"};border-bottom:1px solid #161a22;">${esc(label)}</a>`;
+    })
+    .join("\n");
+
   return `<nav class="mobile-tabbar">
     ${tabs}
     <details class="mobile-more" style="flex:1;">
       <summary style="list-style:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:#8b92a4;cursor:pointer;height:100%;"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #3a4150;"></span>More</summary>
       <div style="position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 58px);background:#0d1016;border-top:1px solid #1b1f29;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);box-shadow:0 -14px 34px rgba(0,0,0,.5);">
+        ${moreLinks ? `<div style="margin-bottom:14px;">${moreLinks}</div>` : ""}
         ${healthStatus()}
       </div>
     </details>
@@ -811,6 +840,29 @@ function liveScript(siteId: string, nonce: string): string {
         var d=JSON.parse(e.data);
         var el=document.getElementById('live-count');
         if(el) el.textContent=d.visitors;
+        var list=document.getElementById('live-pages-list');
+        if(list&&Array.isArray(d.topPages)){
+          list.textContent='';
+          if(d.topPages.length===0){
+            var empty=document.createElement('span');
+            empty.style.cssText='color:#6a7184;font-size:13px;';
+            empty.textContent='No one online right now.';
+            list.appendChild(empty);
+          }
+          d.topPages.forEach(function(p){
+            var row=document.createElement('div');
+            row.style.cssText='display:flex;align-items:center;gap:11px;';
+            var label=document.createElement('span');
+            label.style.cssText="flex:1;font-size:12.5px;color:#cfd4e0;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+            label.textContent=p.label;
+            var count=document.createElement('span');
+            count.style.cssText='flex:none;font-size:12px;color:#9aa1b2;';
+            count.textContent=p.visitors;
+            row.appendChild(label);
+            row.appendChild(count);
+            list.appendChild(row);
+          });
+        }
       }catch(err){}
     };
     ws.onclose=function(){setTimeout(connect,3000);};
@@ -1188,6 +1240,15 @@ dashboard.get("/app", async (c) => {
       ${breakdownCard("Top sources", topSources, "#7a5cff")}
     </div>
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
+    <div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;margin-top:14px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;">Active pages right now</span>
+      </div>
+      <div id="live-pages-list" style="display:flex;flex-direction:column;gap:13px;">
+        <span style="color:#6a7184;font-size:13px;">Waiting for live data&hellip;</span>
+      </div>
+    </div>
     ${liveScript(site.id, nonce)}
   `;
 
@@ -1359,6 +1420,120 @@ dashboard.get("/app/geography", async (c) => {
       `Geography — ${site.name}`,
       "",
       appLayout("geography", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Devices
+dashboard.get("/app/devices", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const [devices, browsers, oses] = await Promise.all([
+    getTopDevices(c.env.DB, site.id, range, 10),
+    getTopBrowsers(c.env.DB, site.id, range, 10),
+    getTopOperatingSystems(c.env.DB, site.id, range, 10),
+  ]);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("Device type", devices, "#4d86ff")}
+      ${breakdownCard("Browser", browsers, "#7a5cff")}
+      ${breakdownCard("Operating system", oses, "#2bd888")}
+    </div>${liveScript(site.id, nonce)}`;
+
+  return c.html(
+    htmlDoc(
+      `Devices — ${site.name}`,
+      "",
+      appLayout("devices", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Campaigns (UTM)
+dashboard.get("/app/campaigns", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const [utmSources, utmMediums, utmCampaigns] = await Promise.all([
+    getTopUtmSources(c.env.DB, site.id, range, 10),
+    getTopUtmMediums(c.env.DB, site.id, range, 10),
+    getTopUtmCampaigns(c.env.DB, site.id, range, 10),
+  ]);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("UTM source", utmSources, "#4d86ff")}
+      ${breakdownCard("UTM medium", utmMediums, "#7a5cff")}
+      ${breakdownCard("UTM campaign", utmCampaigns, "#2bd888")}
+    </div>${liveScript(site.id, nonce)}`;
+
+  return c.html(
+    htmlDoc(
+      `Campaigns — ${site.name}`,
+      "",
+      appLayout("campaigns", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Custom events
+dashboard.get("/app/events", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const rows = await getTopEvents(c.env.DB, site.id, range, 50);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  // dimension='event' counts one "pageview" per fire (event-dimensions.ts),
+  // so the column is labeled Count — Pageviews would be a lie here.
+  const table =
+    rows.length === 0
+      ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
+      <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
+      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+    </div>`
+      : breakdownTable(
+          [
+            { label: "Event", key: "label", mono: true },
+            { label: "Count", key: "pageviews" },
+            { label: "Visitors", key: "visitors" },
+          ],
+          rows,
+        );
+
+  const content = table + liveScript(site.id, nonce);
+
+  return c.html(
+    htmlDoc(
+      `Events — ${site.name}`,
+      "",
+      appLayout("events", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
