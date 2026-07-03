@@ -71,6 +71,11 @@ const MOCK_BREAKDOWN: BreakdownRow[] = [
   { label: "/pricing", pageviews: 2000, visitors: 400, share: 0.33, sampled: false },
 ];
 
+const MOCK_DEVICES: BreakdownRow[] = [
+  { label: "desktop", pageviews: 3000, visitors: 800, share: 0.7, sampled: false },
+  { label: "mobile", pageviews: 1200, visitors: 350, share: 0.3, sampled: false },
+];
+
 vi.mock("../../src/db/queries", () => ({
   getOwner: vi.fn(),
   listSites: vi.fn(),
@@ -125,6 +130,9 @@ beforeEach(() => {
   vi.mocked(queries.getTopPages).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopSources).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopCountries).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopDevices).mockResolvedValue(MOCK_DEVICES);
+  vi.mocked(queries.getTopBrowsers).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopOperatingSystems).mockResolvedValue(MOCK_BREAKDOWN);
 });
 
 // ---------------------------------------------------------------------------
@@ -513,5 +521,55 @@ describe("/live", () => {
       }),
     );
     expect(res.status).toBe(426);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /app/devices (Theme A)
+// ---------------------------------------------------------------------------
+
+describe("/app/devices", () => {
+  it("redirects to /login when unauthenticated", async () => {
+    const { res } = await fetch_(req("/app/devices"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("renders device, browser and OS panels when authed", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/devices", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    expect(text).toContain("Device type");
+    expect(text).toContain("Browser");
+    expect(text).toContain("Operating system");
+    expect(text).toContain("desktop"); // MOCK_DEVICES row rendered
+  });
+
+  it("sidebar nav carries a Devices link preserving site & range", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/devices?site=site-001&range=7d"');
+  });
+
+  it("mobile tab bar keeps exactly 4 tabs; Devices lives in the More sheet", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // The tab bar renders the first four views as tabs only; overflow views
+    // render as full-label links inside the <details> More sheet — so Devices
+    // must appear after the <details> marker, not before it.
+    const tabbarStart = text.indexOf('class="mobile-tabbar"');
+    const moreStart = text.indexOf('<details class="mobile-more"', tabbarStart);
+    expect(moreStart).toBeGreaterThan(tabbarStart);
+    const tabsSection = text.slice(tabbarStart, moreStart);
+    const moreSection = text.slice(moreStart);
+    expect(tabsSection).toContain(">Geo</a>");
+    expect(tabsSection).not.toContain(">Devices</a>");
+    expect(moreSection).toContain(">Devices</a>");
   });
 });

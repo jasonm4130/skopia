@@ -24,7 +24,10 @@ import {
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
+  getTopBrowsers,
   getTopCountries,
+  getTopDevices,
+  getTopOperatingSystems,
   getTopPages,
   getTopSources,
   listSites,
@@ -358,7 +361,12 @@ const NAV_ITEMS = [
   { id: "pages", label: "Pages", href: "/app/pages" },
   { id: "sources", label: "Sources", href: "/app/sources" },
   { id: "geography", label: "Geography", href: "/app/geography" },
+  { id: "devices", label: "Devices", href: "/app/devices" },
 ] as const;
+
+// The mobile bottom bar fits 4 tabs + "More"; views past index 3 render as
+// links inside the More sheet instead of tabs.
+const MOBILE_TAB_COUNT = 4;
 
 // Site switcher <select>. Shared by the desktop sidebar and the mobile top bar.
 // Change events are wired by class (`.js-site-switcher`) from the nonced script
@@ -399,20 +407,35 @@ function mobileTabbar(activeView: string, siteId: string, rangeKey: string): str
     sources: "Sources",
     geography: "Geo",
   };
-  const tabs = NAV_ITEMS.map(({ id, label, href }) => {
-    const active = activeView === id;
-    const fullHref = siteId
-      ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
-      : `${href}?range=${esc(rangeKey)}`;
-    const color = active ? "#9fb4ff" : "#8b92a4";
-    const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
-    return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
-  }).join("\n");
+  const tabs = NAV_ITEMS.slice(0, MOBILE_TAB_COUNT)
+    .map(({ id, label, href }) => {
+      const active = activeView === id;
+      const fullHref = siteId
+        ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+        : `${href}?range=${esc(rangeKey)}`;
+      const color = active ? "#9fb4ff" : "#8b92a4";
+      const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
+      return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
+    })
+    .join("\n");
+
+  // Views past MOBILE_TAB_COUNT render as full-label links in the More sheet.
+  const moreLinks = NAV_ITEMS.slice(MOBILE_TAB_COUNT)
+    .map(({ id, label, href }) => {
+      const active = activeView === id;
+      const fullHref = siteId
+        ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
+        : `${href}?range=${esc(rangeKey)}`;
+      return `<a href="${fullHref}" style="display:block;padding:12px 4px;font-size:14px;color:${active ? "#9fb4ff" : "#cfd4e0"};border-bottom:1px solid #161a22;">${esc(label)}</a>`;
+    })
+    .join("\n");
+
   return `<nav class="mobile-tabbar">
     ${tabs}
     <details class="mobile-more" style="flex:1;">
       <summary style="list-style:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:#8b92a4;cursor:pointer;height:100%;"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #3a4150;"></span>More</summary>
       <div style="position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 58px);background:#0d1016;border-top:1px solid #1b1f29;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);box-shadow:0 -14px 34px rgba(0,0,0,.5);">
+        ${moreLinks ? `<div style="margin-bottom:14px;">${moreLinks}</div>` : ""}
         ${healthStatus()}
       </div>
     </details>
@@ -1359,6 +1382,41 @@ dashboard.get("/app/geography", async (c) => {
       `Geography — ${site.name}`,
       "",
       appLayout("geography", sites, site, headerRight, content, nonce, range.key),
+      nonce,
+    ),
+  );
+});
+
+// Devices
+dashboard.get("/app/devices", async (c) => {
+  const nonce = c.get("nonce");
+  const siteParam = c.req.query("site");
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
+
+  const { sites, site } = await resolveSites(c.env.DB, siteParam);
+  if (!site) return c.redirect("/app");
+
+  const [devices, browsers, oses] = await Promise.all([
+    getTopDevices(c.env.DB, site.id, range, 10),
+    getTopBrowsers(c.env.DB, site.id, range, 10),
+    getTopOperatingSystems(c.env.DB, site.id, range, 10),
+  ]);
+
+  const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
+  const headerRight = rangePicker(range.key, siteHiddenInput);
+
+  const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("Device type", devices, "#4d86ff")}
+      ${breakdownCard("Browser", browsers, "#7a5cff")}
+      ${breakdownCard("Operating system", oses, "#2bd888")}
+    </div>${liveScript(site.id, nonce)}`;
+
+  return c.html(
+    htmlDoc(
+      `Devices — ${site.name}`,
+      "",
+      appLayout("devices", sites, site, headerRight, content, nonce, range.key),
       nonce,
     ),
   );
