@@ -87,4 +87,15 @@ describe("ensureSchema", () => {
     expect(cols).toContain("visitors");
     expect(cols).toContain("sampled");
   });
+
+  it("embeds every migration, not just 0001 (regression: 0002's table must exist)", async () => {
+    await ensureSchema(env.DB);
+    const result = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name = 'rollup_daily_shadow'",
+    ).all<{ name: string }>();
+    // rollup_daily_shadow is created by migrations/0002_rollup_shadow.sql. If the
+    // embed only contains 0001, a cold Deploy-button account lacks this table and
+    // DO shadow flushes fail silently (tech sweep D6).
+    expect(result.results.map((r) => r.name)).toContain("rollup_daily_shadow");
+  });
 });
