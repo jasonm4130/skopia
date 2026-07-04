@@ -111,6 +111,7 @@ vi.mock("../../src/db/queries", () => ({
 
 import * as queries from "../../src/db/queries";
 import worker from "../../src/index";
+import { applyMigrations } from "../apply-migrations";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -242,6 +243,105 @@ describe("/login", () => {
     expect(text).toContain("Invalid email or password");
     expect(deriveBitsSpy).toHaveBeenCalled();
     deriveBitsSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PBKDF2 iteration cap (production incident 2026-07-05): the Workers runtime
+// rejects PBKDF2 above 100k iterations ("NotSupportedError: iteration counts
+// above 100000 are not supported"), which turned every production POST /login
+// into a 500 while the code derived at 210k. Local workerd does NOT enforce
+// the cap, so these tests pin the code-level contract instead: new hashes
+// embed their iteration count, verification derives at the embedded (or
+// legacy-implied 100k) count, and a count above the cap is rejected without
+// ever calling deriveBits.
+// ---------------------------------------------------------------------------
+
+async function pbkdf2Hex(password: string, saltHex: string, iterations: number): Promise<string> {
+  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    keyMaterial,
+    256,
+  );
+  return Array.from(new Uint8Array(bits))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function loginForm(email: string, password: string): RequestInit {
+  return {
+    method: "POST",
+    body: new URLSearchParams({ email, password }).toString(),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  };
+}
+
+describe("PBKDF2 iteration cap", () => {
+  const SALT_HEX = "000102030405060708090a0b0c0d0e0f";
+
+  it("accepts a v2 hash with an embedded 100k iteration count", async () => {
+    const hash = await pbkdf2Hex("password123", SALT_HEX, 100_000);
+    vi.mocked(queries.getOwner).mockResolvedValue({
+      ...MOCK_OWNER,
+      pw_hash: `pbkdf2:100000:${SALT_HEX}:${hash}`,
+    });
+    const { res } = await fetch_(req("/login", loginForm("owner@test.dev", "password123")));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("set-cookie")).toContain("skopia_session");
+  });
+
+  it("verifies a legacy 3-part hash at the 100k it was created with", async () => {
+    const hash = await pbkdf2Hex("password123", SALT_HEX, 100_000);
+    vi.mocked(queries.getOwner).mockResolvedValue({
+      ...MOCK_OWNER,
+      pw_hash: `pbkdf2:${SALT_HEX}:${hash}`,
+    });
+    const { res } = await fetch_(req("/login", loginForm("owner@test.dev", "password123")));
+    expect(res.status).toBe(302);
+  });
+
+  it("rejects a hash demanding iterations above the cap without deriving (401, not 500)", async () => {
+    const deriveBitsSpy = vi.spyOn(crypto.subtle, "deriveBits");
+    vi.mocked(queries.getOwner).mockResolvedValue({
+      ...MOCK_OWNER,
+      pw_hash: `pbkdf2:210000:${SALT_HEX}:${"ab".repeat(32)}`,
+    });
+    const { res } = await fetch_(req("/login", loginForm("owner@test.dev", "password123")));
+    expect(res.status).toBe(401);
+    for (const call of deriveBitsSpy.mock.calls) {
+      expect((call[0] as { iterations: number }).iterations).toBeLessThanOrEqual(100_000);
+    }
+    deriveBitsSpy.mockRestore();
+  });
+
+  it("new hashes created by /setup embed the 100k iteration count", async () => {
+    await applyMigrations();
+    vi.mocked(queries.getOwner).mockResolvedValue(null);
+    const form = new URLSearchParams({
+      email: "fresh@test.dev",
+      password: "password123",
+      confirm: "password123",
+    });
+    const { res } = await fetch_(
+      req("/setup", {
+        method: "POST",
+        body: form.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    );
+    expect(res.status).toBe(302);
+    const row = await env.DB.prepare("SELECT pw_hash FROM users WHERE email = ?")
+      .bind("fresh@test.dev")
+      .first<{ pw_hash: string }>();
+    expect(row?.pw_hash).toMatch(/^pbkdf2:100000:[0-9a-f]{32}:[0-9a-f]{64}$/);
   });
 });
 
