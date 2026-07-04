@@ -121,8 +121,12 @@ export function parseUserAgent(ua: string): UaInfo {
 
 // Known bot UA substrings (case-insensitive). Keep this list minimal — it must
 // run on every request, so a huge list is a latency cost.
+//
+// The bare "bot" substring is deliberately NOT in this list: it false-positives
+// on CUBOT-brand Android phones (real humans). It's checked separately below,
+// against a brand-stripped copy of the UA, so real crawlers ("SomethingBot/1.0")
+// are still caught.
 const BOT_UA_PATTERNS = [
-  "bot",
   "spider",
   "crawl",
   "slurp",
@@ -169,19 +173,25 @@ const BOT_UA_PATTERNS = [
   "puppeteer",
 ];
 
-// Datacenter / cloud ASN org name patterns (lowercased)
+// Datacenter / cloud ASN org name patterns (lowercased).
+//
+// For an honest-metrics product, false-positives on humans are strictly worse
+// than false-negatives on scrapers. "cloudflare", "fastly", and "akamai" are
+// deliberately excluded: they're the documented iCloud Private Relay egress
+// partners, so including them silently drops every Private-Relay Safari user.
+// "google" is narrowed to "google cloud": the bare string also matches
+// residential ISPs like "GOOGLE-FIBER". (Accepted trade: GCP egress
+// identifying under a different org string slips this one heuristic — the UA
+// and header heuristics still apply.)
 const DATACENTER_ORG_PATTERNS = [
   "amazon",
-  "google",
+  "google cloud",
   "microsoft",
   "digitalocean",
   "linode",
   "hetzner",
   "ovh",
   "vultr",
-  "cloudflare",
-  "fastly",
-  "akamai",
   "serverius",
   "leaseweb",
   "datacamp",
@@ -192,12 +202,15 @@ const DATACENTER_ORG_PATTERNS = [
 /**
  * Heuristic bot check (free-tier only — no Enterprise Bot Management, spec §3.3):
  * UA blocklist + datacenter-ASN/asOrganization + missing-header heuristics +
- * `cf.verifiedBot` where present. Returns true to DROP the request.
+ * `cf.verifiedBotCategory` where present. Returns true to DROP the request.
  */
 export function isBot(request: Request, ua: string, cf: CfEnrichment): boolean {
-  // 1. `cf.verifiedBot` — Super Bot Fight Mode surfaces this
+  // 1. `cf.verifiedBotCategory` — the all-plans verified-bot field (not
+  // `cf.botManagement.*`, which is Enterprise-only).
   const cfRaw = (request as Request & { cf?: Record<string, unknown> }).cf ?? {};
-  if (cfRaw.verifiedBot === true) return true;
+  if (typeof cfRaw.verifiedBotCategory === "string" && cfRaw.verifiedBotCategory.length > 0) {
+    return true;
+  }
 
   // 2. Empty UA
   if (!ua || ua.trim() === "") return true;
@@ -207,6 +220,12 @@ export function isBot(request: Request, ua: string, cf: CfEnrichment): boolean {
   for (const pattern of BOT_UA_PATTERNS) {
     if (uaLower.includes(pattern)) return true;
   }
+
+  // 3b. Bare "bot" substring, checked against a brand-stripped copy of the UA
+  // so CUBOT-brand Android phones (real humans) don't false-positive, while
+  // real crawlers ("SomethingBot/1.0") still get caught.
+  const uaStripped = uaLower.replace(/cubot/g, "");
+  if (uaStripped.includes("bot")) return true;
 
   // 4. Datacenter ASN org heuristic
   const orgLower = cf.asOrganization.toLowerCase();
