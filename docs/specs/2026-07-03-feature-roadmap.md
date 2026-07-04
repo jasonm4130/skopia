@@ -81,11 +81,12 @@ Rate").
 
 **C3 — Free-tier capacity is smaller than the old spec implied (docs honesty).**
 Post the DO-durability redesign (ADR-0010), the binding free-tier limit is **DO rows-written
-(~0.9M events/mo)**, ~3× tighter than the ~3M/mo the 2026-06-21 spec named (tech doc §3.2). This
+(100k/day free)**, supporting **~500k–0.9M pageviews/month depending on traffic shape** (resolved
+in O5, research §2), ~3× tighter than the ~3M/mo the 2026-06-21 spec named (tech doc §3.2). This
 affects what we tell self-hosters about "free."
-- **We say:** free tier comfortably covers typical indie/SMB traffic (hundreds of thousands of
-  monthly events); heavy sites move to Workers Paid (~$5/mo at 10M events). **We don't** repeat the
-  stale ~3M/mo free ceiling. (Open question O5 tracks confirming the exact number.)
+- **We say:** free tier comfortably covers typical indie/SMB traffic (~500k safe minimum, up to 0.9M
+  for returning/multi-page sites); heavy sites move to Workers Paid (~$5/mo at 10M events). **We don't**
+  repeat the stale ~3M/mo free ceiling.
 
 **C4 — 90-day history is the WAE limit (honest, and compliant).**
 WAE retention is a hard 3-month cap on all plans (tech §3.1). This is **under** CNIL Sheet 16's
@@ -231,10 +232,11 @@ heatmaps + revenue) — that is *their* bloat and *our* contrast (`roadmap-input
   IP is hashed with the daily salt and discarded, never stored. Whether last-byte truncation *into
   the hash* is required for CNIL Sheet 16 is a legal question above the agents' pay grade. **Flag
   for human/legal**, not resolved here. (Retention shortening itself is a confirmed S — tech §4.)
-- **O5 — Free-tier number (tech lead, MEDIUM confidence).** The ~0.9M events/mo free-tier ceiling
-  and ~$15/mo @ 20M rest on the inferred 2.25× `seen` multiplier; ADR-0010 plans to capture real
-  `meta.rows_written` on the Phase-2 parity run. **We should not publish a precise free-tier number
-  until that lands** — §1 C3 uses a hedged claim meanwhile.
+- **O5 — Free-tier number (tech lead).** Measured via Phase-2 prep: the multiplier is traffic-shape
+  dependent (≈ 2.25×–7×), so the ceiling is a **range, not a point**. **RESOLVED 2026-07-04:**
+  DO rows-written (100k/day free) is the binding limit. Publish: **~500k pageviews/month safe across
+  all traffic shapes, up to ~0.9M for typical returning/multi-page sites**. Assumes the ~5× per-pageview
+  multiplier post-Task-3. *Cite:* `docs/research/2026-07-04-do-counters-design-iteration.md` §2.
 - **O6 — Sessionization cost/design (tech lead, ADR #11).** The funnels L-estimate depends on the
   chosen sessionization design (DO per-visitor vs D1 sessions table) and its per-event cost. This is
   the single biggest unknown gating Theme C; commission it early (Theme B window).
