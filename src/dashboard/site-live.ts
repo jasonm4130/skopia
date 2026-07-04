@@ -2,10 +2,11 @@
  * Skopia — SiteLive Durable Object (per-site live visitor count, spec §6).
  *
  * One instance per site (`idFromName(site_id)`). Keeps an in-memory
- * `vid -> lastSeen` map, evicts entries older than 5 minutes (driven by a DO
- * Alarm), and treats the map size as the live-visitor count. Dashboards connect
- * over a hibernatable WebSocket (`acceptWebSocket`/`getWebSockets`) and receive
- * the count + top active pages on change.
+ * `vid -> lastSeen` map, lazily evicts entries older than 5 minutes on read
+ * (no alarm involved — see `currentSnapshot()`), and treats the map size as
+ * the live-visitor count. Dashboards connect over a hibernatable WebSocket
+ * (`acceptWebSocket`/`getWebSockets`) and receive the count + top active pages
+ * on change.
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -340,7 +341,7 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
-  /** Tick: flush counters, prune stale seen rows, evict stale visitors (spec §6). */
+  /** Tick: flush counters, prune stale seen rows (spec §6). */
   override async alarm(): Promise<void> {
     await this.flush();
 
@@ -355,18 +356,11 @@ export class SiteLive extends DurableObject<Env> {
       }
     }
 
-    const cutoff = Date.now() - VISITOR_TTL_MS;
-    let evicted = false;
-    for (const [vid, entry] of this.visitors) {
-      if (entry.lastSeen < cutoff) {
-        this.visitors.delete(vid);
-        evicted = true;
-      }
-    }
-    if (evicted) this.broadcast();
-
-    // Reschedule while there is live activity or counters still to flush.
-    if (this.visitors.size > 0 || this.pending.size > 0) {
+    // Reschedule only while there are counters still to flush. Live-visitor
+    // eviction is lazy (see `currentSnapshot()`) and no longer keeps the alarm
+    // ticking — a session with no further events must not trail up to ~20
+    // billed setAlarm row-writes waiting out the 5-minute live TTL.
+    if (this.pending.size > 0) {
       await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
   }
@@ -381,6 +375,17 @@ export class SiteLive extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
 
   private currentSnapshot(): LiveSnapshot {
+    // Lazy eviction (Task 3): the flush alarm no longer evicts, so staleness is
+    // resolved here instead — the live count is correct at every read. `visitors`
+    // is RAM-only and hibernation clears it naturally, so leaving stale entries
+    // between reads is not unbounded growth, just a bounded staleness window.
+    const cutoff = Date.now() - VISITOR_TTL_MS;
+    for (const [vid, entry] of this.visitors) {
+      if (entry.lastSeen < cutoff) {
+        this.visitors.delete(vid);
+      }
+    }
+
     const pageCounts = new Map<string, number>();
     for (const { path } of this.visitors.values()) {
       pageCounts.set(path, (pageCounts.get(path) ?? 0) + 1);
@@ -402,6 +407,8 @@ export class SiteLive extends DurableObject<Env> {
   }
 
   private broadcast(): void {
+    // Skip building the snapshot entirely when no dashboard is connected.
+    if (this.ctx.getWebSockets().length === 0) return;
     const payload = JSON.stringify(this.currentSnapshot());
     for (const ws of this.ctx.getWebSockets()) {
       try {

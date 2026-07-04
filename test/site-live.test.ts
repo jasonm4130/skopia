@@ -532,3 +532,60 @@ describe("SiteLive subtractive chunk-committed flush", () => {
     expect(last?.pageviews).toBe(1);
   });
 });
+
+// Task 3: live-visitor eviction is decoupled from the flush alarm (measured
+// 2026-07-04: the alarm re-armed while `visitors.size > 0`, trailing up to ~20
+// billed setAlarm row-writes per session regardless of event count). The alarm
+// now reschedules on `pending.size > 0` alone; staleness is evicted lazily on
+// read (`currentSnapshot()`), so the live count is still correct at every read.
+describe("SiteLive alarm reschedule + lazy eviction (Task 3)", () => {
+  it("does not re-arm the alarm once nothing is pending, even with a live visitor connected", async () => {
+    const stub = stubFor("alarm-tail-1");
+    const site = "alarm-tail-1-site";
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: site })),
+    });
+    await runDurableObjectAlarm(stub); // flushes; pending empties; visitor still "live" in RAM
+
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as {
+        pending: Map<string, unknown>;
+        visitors: Map<string, unknown>;
+        ctx: { storage: { getAlarm(): Promise<number | null> } };
+      };
+      expect(i.pending.size).toBe(0);
+      expect(i.visitors.size).toBe(1); // still live — nothing evicted it
+      expect(await i.ctx.storage.getAlarm()).toBeNull(); // no reschedule tail
+    });
+  });
+
+  it("evicts a stale visitor lazily on snapshot, without any alarm having run", async () => {
+    const stub = stubFor("lazy-evict-1");
+    const site = "lazy-evict-1-site";
+    vi.useFakeTimers();
+    try {
+      await stub.fetch("https://do-internal/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: site })),
+      });
+
+      vi.advanceTimersByTime(6 * 60 * 1000); // past the 5-minute live TTL
+
+      await runInDurableObject(stub, async (instance) => {
+        const i = instance as unknown as {
+          visitors: Map<string, unknown>;
+          snapshot(): Promise<{ visitors: number }>;
+        };
+        expect(i.visitors.size).toBe(1); // still in RAM — no alarm has run to evict it
+        const snap = await i.snapshot();
+        expect(snap.visitors).toBe(0); // evicted lazily on read
+        expect(i.visitors.size).toBe(0); // read-time eviction mutates the map
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
