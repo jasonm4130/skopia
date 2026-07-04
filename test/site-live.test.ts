@@ -101,7 +101,7 @@ describe("SiteLive.flush", () => {
     });
 
     const row = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
     )
       .bind("do-site", day)
       .first<{ pageviews: number; visitors: number }>();
@@ -172,12 +172,12 @@ describe("SiteLive day rollover", () => {
     }
 
     const r0 = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
     )
       .bind(site, d0)
       .first<{ pageviews: number; visitors: number }>();
     const r1 = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
     )
       .bind(site, d1)
       .first<{ pageviews: number; visitors: number }>();
@@ -224,12 +224,12 @@ describe("SiteLive day rollover", () => {
     }
 
     const r0 = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
     )
       .bind(site, d0)
       .first<{ pageviews: number; visitors: number }>();
     const r1 = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
     )
       .bind(site, d1)
       .first<{ pageviews: number; visitors: number }>();
@@ -279,7 +279,7 @@ describe("SiteLive day rollover", () => {
     });
 
     const row = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='total'",
     )
       .bind(site, legacyDay)
       .first<{ pageviews: number }>();
@@ -314,7 +314,7 @@ describe("SiteLive /event + alarm", () => {
     await stub.fetch("https://do-internal/event", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Distinct site_id: rollup_daily_shadow is a shared D1 table and the
+      // Distinct site_id: rollup_daily is a shared D1 table and the
       // flush UPSERT is additive, so reusing "do-site" would accumulate other
       // tests' pageviews into this row. A per-test site_id isolates the assert.
       body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: "ev2-site" })),
@@ -322,7 +322,7 @@ describe("SiteLive /event + alarm", () => {
     await runDurableObjectAlarm(stub); // fire the scheduled flush+evict tick
 
     const row = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='total'",
     )
       .bind("ev2-site", day)
       .first<{ pageviews: number }>();
@@ -382,7 +382,7 @@ describe("SiteLive durability across hibernation", () => {
     });
 
     const row = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p'",
     )
       .bind("dur2-site", day)
       .first<{ pageviews: number; visitors: number }>();
@@ -413,7 +413,7 @@ describe("SiteLive durability across hibernation", () => {
     });
 
     const row = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='total'",
     )
       .bind("dur3-site", day)
       .first<{ pageviews: number }>();
@@ -468,7 +468,7 @@ describe("SiteLive subtractive chunk-committed flush", () => {
     }
 
     const row = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND day=? AND dimension='total'",
     )
       .bind(site, day)
       .first<{ pageviews: number; visitors: number }>();
@@ -511,7 +511,7 @@ describe("SiteLive subtractive chunk-committed flush", () => {
 
     // `total` is a chunk-1 row: committed once, never re-applied by the retry.
     const total = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='total'",
     )
       .bind(site, day)
       .first<{ pageviews: number }>();
@@ -519,12 +519,12 @@ describe("SiteLive subtractive chunk-committed flush", () => {
 
     // A chunk-1 page (/p0) and a chunk-2 page (/p149) each land exactly once.
     const first = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p0'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p0'",
     )
       .bind(site, day)
       .first<{ pageviews: number }>();
     const last = await env.DB.prepare(
-      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p149'",
+      "SELECT pageviews FROM rollup_daily WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p149'",
     )
       .bind(site, day)
       .first<{ pageviews: number }>();

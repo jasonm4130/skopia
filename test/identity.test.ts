@@ -6,13 +6,12 @@
  * - Different salt → different vid (cross-day correlation impossible)
  * - Raw IP never appears in the output
  * - utcDay formatting
- * - getDailySalt: creates on first access, stable on repeat calls
- * - rotateDailySalt: idempotent; deletes yesterday's key
+ * - getDailySalt: creates on first access, stable on repeat calls, 25h self-expiring TTL
  */
 
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
-import { deriveVid, getDailySalt, rotateDailySalt, utcDay } from "../src/shared/identity";
+import { describe, expect, it, vi } from "vitest";
+import { deriveVid, getDailySalt, utcDay } from "../src/shared/identity";
 
 describe("utcDay", () => {
   it("formats a UTC date as YYYY-MM-DD", () => {
@@ -93,33 +92,13 @@ describe("getDailySalt", () => {
     expect(typeof s1).toBe("string");
     expect(typeof s2).toBe("string");
   });
-});
 
-describe("rotateDailySalt", () => {
-  it("is idempotent: calling twice for the same day is safe", async () => {
-    const now = new Date("2026-06-25T01:00:00Z");
-    await rotateDailySalt(env.SALT, now);
-    await rotateDailySalt(env.SALT, now);
-    // Today's salt should still exist
-    const salt = await getDailySalt(env.SALT, "2026-06-25");
-    expect(typeof salt).toBe("string");
-    expect(salt.length).toBeGreaterThan(0);
-  });
-
-  it("ensures today's salt exists after rotation", async () => {
-    const now = new Date("2026-06-26T00:05:00Z");
-    await rotateDailySalt(env.SALT, now);
-    const salt = await env.SALT.get("salt:2026-06-26");
-    expect(salt).not.toBeNull();
-  });
-
-  it("deletes yesterday's salt during rotation", async () => {
-    // Seed yesterday's key manually
-    await env.SALT.put("salt:2026-06-26", "old-salt-value");
-    const now = new Date("2026-06-27T00:05:00Z");
-    await rotateDailySalt(env.SALT, now);
-    const yesterday = await env.SALT.get("salt:2026-06-26");
-    expect(yesterday).toBeNull();
+  it("stores a new salt with a 25h self-expiring TTL", async () => {
+    const putSpy = vi.spyOn(env.SALT, "put");
+    await getDailySalt(env.SALT, "2026-06-28");
+    expect(putSpy).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+      expirationTtl: 25 * 60 * 60,
+    });
   });
 });
 

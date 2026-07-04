@@ -593,7 +593,7 @@ describe("handleCollect — SiteLive DO bump", () => {
     const { runDurableObjectAlarm } = await import("cloudflare:test");
     await runDurableObjectAlarm(stub);
     const shadow = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND dimension='total'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND dimension='total'",
     )
       .bind("live-site")
       .first<{ pageviews: number; visitors: number }>();
@@ -837,7 +837,7 @@ describe("handleCollect — input validation bounds (Task 8)", () => {
     await runDurableObjectAlarm(stub);
 
     const eventRow = await env.DB.prepare(
-      "SELECT dim_value FROM rollup_daily_shadow WHERE site_id=? AND dimension='event'",
+      "SELECT dim_value FROM rollup_daily WHERE site_id=? AND dimension='event'",
     )
       .bind("pv-fake-event-site")
       .first();

@@ -1,17 +1,17 @@
 /**
  * Skopia — root Worker entry (single-Worker topology).
  *
- * One Worker hosts the collector route, the dashboard + marketing SSR, and the
- * cron `scheduled()` rollup. Bindings are shared (wrangler.jsonc). Feature agents
- * implement their own modules (collector / dashboard / marketing / rollup) and do
- * not edit this wiring beyond what their surface requires.
+ * One Worker hosts the collector route and the dashboard + marketing SSR.
+ * Bindings are shared (wrangler.jsonc). Feature agents implement their own
+ * modules (collector / dashboard / marketing) and do not edit this wiring
+ * beyond what their surface requires. Phase 2 (ADR-0011): the DO is the sole
+ * `rollup_daily` writer — the cron trigger and its export handler are retired.
  */
 
 import { Hono } from "hono";
 import { handleCollect, handlePreflight } from "./collector";
 import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
-import { handleScheduled } from "./rollup";
 import { type AppEnv, securityHeaders } from "./shared/security-headers";
 import { SKOPIA_JS } from "./shared/skopia-embed";
 import type { Env } from "./shared/types";
@@ -57,7 +57,4 @@ app.route("/", marketing);
 
 export default {
   fetch: app.fetch,
-  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
-    ctx.waitUntil(handleScheduled(controller, env, ctx));
-  },
 } satisfies ExportedHandler<Env>;

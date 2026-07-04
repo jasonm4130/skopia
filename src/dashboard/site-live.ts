@@ -29,8 +29,8 @@ const SEEN_DDL = `CREATE TABLE IF NOT EXISTS seen (
   PRIMARY KEY (day, dimension, dim_value, vid)
 ) WITHOUT ROWID`;
 
-/** Phase 1 writes the shadow table; Phase 2 flips this to "rollup_daily". */
-const FLUSH_TABLE = "rollup_daily_shadow";
+/** Phase 2 (cutover, ADR-0011): the DO is the sole writer of "rollup_daily". */
+const FLUSH_TABLE = "rollup_daily";
 
 const FLUSH_UPSERT = `
 INSERT INTO ${FLUSH_TABLE} (site_id, day, dimension, dim_value, pageviews, visitors, sampled)

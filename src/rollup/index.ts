@@ -1,14 +1,18 @@
+// RETAINED (unused by the Worker) as the manual WAE→rollup recompute backstop
+// until the shadow-drop follow-up lands (ADR-0011). Do not delete before
+// rollup_daily_shadow is dropped.
 /**
  * Skopia — rollup cron (WAE -> D1 exact aggregates).
  *
- * Runs on the cron trigger (spec §5.1): query WAE with sampling-correct SQL,
- * GROUP BY each dimension, upsert exact aggregates into `rollup_daily`, set the
- * `sampled` flag via the count() check, and rotate the daily salt on the first
- * pass after UTC midnight.
+ * Phase 1/pre-cutover: ran on the cron trigger (spec §5.1). Phase 2 (ADR-0011)
+ * retired the cron — the DO is now the sole `rollup_daily` writer — so this is
+ * kept only as a manually-invoked recompute: query WAE with sampling-correct
+ * SQL, GROUP BY each dimension, and upsert exact aggregates into `rollup_daily`,
+ * setting the `sampled` flag via the count() check.
  */
 
 import { requireSecrets, SecretsMissingError } from "../shared/config";
-import { rotateDailySalt, utcDay } from "../shared/identity";
+import { utcDay } from "../shared/identity";
 import type { Env, RollupDimension } from "../shared/types";
 
 // ---------------------------------------------------------------------------
@@ -227,10 +231,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
     throw err;
   }
 
-  // 1. Rotate daily salt on every cron pass (idempotent, spec §3.5)
-  await rotateDailySalt(env.SALT, new Date());
-
-  // 2. Fetch all site IDs from D1
+  // 1. Fetch all site IDs from D1
   const sitesResult = await env.DB.prepare("SELECT id FROM sites").all<{ id: string }>();
   const sites = sitesResult.results ?? [];
   if (sites.length === 0) return;
@@ -248,7 +249,7 @@ export async function runRollups(env: Env, fetcher: typeof fetch = fetch): Promi
   // WAE dataset name must match the `dataset` field in wrangler.jsonc
   const dataset = "skopia_events";
 
-  // 3. For each site × dimension × day, query WAE and upsert into D1
+  // 2. For each site × dimension × day, query WAE and upsert into D1
   const upsertStmt = env.DB.prepare(`
     INSERT INTO rollup_daily (site_id, day, dimension, dim_value, pageviews, visitors, sampled)
     VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -2,8 +2,9 @@
  * Skopia — cookieless visitor identity (foundation-owned signatures, FINAL).
  *
  * The visitor id is a daily-salted HMAC over (ip, ua, site_id). The raw IP is
- * NEVER persisted; the salt rotates at UTC midnight and yesterday's salt is
- * deleted, so cross-day correlation is impossible (spec §3.5 / ADR-0002).
+ * NEVER persisted; each day's salt self-expires via KV TTL (see
+ * {@link getDailySalt}), so cross-day correlation is impossible (spec §3.5 /
+ * ADR-0002).
  */
 
 // Module-level single-entry memo: the collector calls deriveVid with the same
@@ -74,27 +75,11 @@ export async function getDailySalt(kv: KVNamespace, day: string): Promise<string
   let salt = "";
   for (const b of random) salt += b.toString(16).padStart(2, "0");
 
-  // TTL = 48 h so yesterday's salt expires automatically (spec §3.5)
-  await kv.put(key, salt, { expirationTtl: 48 * 60 * 60 });
+  // TTL = 25 h (ADR-0011): the date-keyed salt is only needed for its own UTC
+  // day; ~25 h self-deletion preserves the ~24 h cross-day-correlation window
+  // the cron's explicit delete previously provided.
+  await kv.put(key, salt, { expirationTtl: 25 * 60 * 60 });
   return salt;
-}
-
-/**
- * Rotate the daily salt: ensure today's salt exists and let yesterday's expire.
- * Called by the cron daily pass (spec §3.5). Idempotent.
- *
- * @param kv   the SALT KV namespace
- * @param now  the current time
- */
-export async function rotateDailySalt(kv: KVNamespace, now: Date): Promise<void> {
-  const today = utcDay(now);
-  // Ensure today's salt is created (getDailySalt is idempotent: no-op if exists)
-  await getDailySalt(kv, today);
-  // Yesterday's salt was stored with a 48 h TTL, so it expires on its own.
-  // Explicitly delete it for prompter cross-day correlation prevention.
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const yesterdayKey = `salt:${utcDay(yesterday)}`;
-  await kv.delete(yesterdayKey);
 }
 
 /** Format a Date as a UTC day string, 'YYYY-MM-DD'. */

@@ -365,7 +365,10 @@ export async function handleCollect(
           }),
         )
         .catch(() => {
-          // DO is best-effort; WAE already holds the durable copy.
+          // Bounded, accepted loss (ADR-0011): the cron reconciler is retired,
+          // so a dropped DO delivery is no longer self-healed automatically.
+          // WAE retains the raw events for manual recompute via
+          // src/rollup/index.ts until the shadow-drop follow-up PR.
         }),
     );
 
