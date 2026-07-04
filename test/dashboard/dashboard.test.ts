@@ -217,6 +217,32 @@ describe("/login", () => {
     expect(res.status).toBe(401);
     expect(text).toContain("Invalid email or password");
   });
+
+  // -------------------------------------------------------------------------
+  // Timing oracle (Task 9): the `emailMatches && verifyPassword(...)` check
+  // must not short-circuit on email mismatch — verifyPassword (PBKDF2, via
+  // crypto.subtle.deriveBits) has to run either way so a wrong email and a
+  // wrong password cost the same CPU time.
+  // -------------------------------------------------------------------------
+
+  it("still runs the PBKDF2 check on an email mismatch (no timing oracle)", async () => {
+    const deriveBitsSpy = vi.spyOn(crypto.subtle, "deriveBits");
+    const form = new URLSearchParams({
+      email: "definitely-not-owner@test.dev",
+      password: "whatever",
+    });
+    const { res, text } = await fetch_(
+      req("/login", {
+        method: "POST",
+        body: form.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(text).toContain("Invalid email or password");
+    expect(deriveBitsSpy).toHaveBeenCalled();
+    deriveBitsSpy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -490,6 +516,79 @@ describe("sampled data badge", () => {
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: false });
     const { text } = await fetch_(req("/public/pub-tok-abc123"));
     expect(text).not.toContain("~est");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Breakdown-table honesty (Task 9): the Visitors column is a sum of daily
+// uniques (same caveat as the Overview stat card), and a sampled row must
+// carry the same ~est badge the Overview shows.
+// ---------------------------------------------------------------------------
+
+describe("breakdown table honesty (Task 9)", () => {
+  it("Visitors column header carries the same daily-counted-once caveat as Overview", async () => {
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    const visitorsHeaderIdx = text.indexOf(">Visitors<");
+    expect(visitorsHeaderIdx).toBeGreaterThan(-1);
+    const headerSnippet = text.slice(Math.max(0, visitorsHeaderIdx - 400), visitorsHeaderIdx);
+    expect(headerSnippet).toContain("counted once per day");
+  });
+
+  it("renders the ~est badge on a row whose sampled flag is set, not on unsampled rows", async () => {
+    const sampledRow: BreakdownRow = {
+      label: "/sampled-page",
+      pageviews: 900,
+      visitors: 300,
+      share: 0.3,
+      sampled: true,
+    };
+    vi.mocked(queries.getTopPages).mockResolvedValue([...MOCK_BREAKDOWN, sampledRow]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const sampledRowStart = text.indexOf("/sampled-page");
+    expect(sampledRowStart).toBeGreaterThan(-1);
+    expect(text.slice(sampledRowStart, sampledRowStart + 800)).toContain("~est");
+
+    const homeRowStart = text.indexOf("/home");
+    expect(homeRowStart).toBeGreaterThan(-1);
+    expect(text.slice(homeRowStart, homeRowStart + 800)).not.toContain("~est");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Geography map JSON safety (Task 9): jsonForScript must neutralize
+// "</script>" inside a country label before it lands inline in a <script>
+// block. Not exploitable today (cf.country is trusted), but the escaping
+// must hold for any value routed through this helper.
+// ---------------------------------------------------------------------------
+
+describe("geography map JSON safety (jsonForScript, Task 9)", () => {
+  it("escapes </script> inside a country label instead of leaking it verbatim", async () => {
+    const evilRow: BreakdownRow = {
+      label: "</script><img src=x>",
+      pageviews: 10,
+      visitors: 5,
+      share: 1,
+      sampled: false,
+    };
+    vi.mocked(queries.getTopCountries).mockResolvedValue([evilRow]);
+    const cookieVal = await authedCookie();
+    const { res, text } = await fetch_(
+      req("/app/geography", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+    // Plain JSON.stringify would emit this literally inside the inline
+    // <script> block, letting the string's own "</script>" close the tag.
+    expect(text).not.toContain("</script><img src=x>");
+    // jsonForScript escapes the angle brackets to literal < / >
+    // text, which stays valid JSON/JS but can no longer close the tag.
+    expect(text).toContain("\\u003c/script\\u003e\\u003cimg src=x\\u003e");
   });
 });
 

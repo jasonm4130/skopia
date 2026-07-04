@@ -197,6 +197,28 @@ function esc(s: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Serialize a value for safe embedding inside an inline `<script>` block.
+ * `JSON.stringify` does not neutralize "</script>" (or a literal U+2028 /
+ * U+2029 line separator) inside a string value — an attacker-controlled
+ * value could otherwise close the script tag early. Escaping the TEXT of
+ * the JSON output (not the runtime characters) keeps it valid JSON/JS.
+ */
+function jsonForScript(v: unknown): string {
+  return JSON.stringify(v)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+// Fixed PBKDF2 hash burned at module load so a wrong-email login still pays
+// the same cost as a wrong-password login (timing oracle fix). Generated
+// once with hashPassword(); the password behind it was discarded and is
+// never a real account's.
+const DUMMY_PW_HASH =
+  "pbkdf2:f8e2f6592433638278ecae10877afe6f:b3c2bc9287a57b06ecb5f1ed2c9ced7608c471fe32555544c450b5bea39bd285";
+
 // ---------------------------------------------------------------------------
 // Date-range helpers
 // ---------------------------------------------------------------------------
@@ -552,15 +574,23 @@ function rangePicker(currentKey: string, extraParams: string): string {
 // Stat cards HTML
 // ---------------------------------------------------------------------------
 
+// Shared with the breakdown table's Visitors column header — same caveat,
+// same wording, wherever a "Visitors" figure is a sum of daily uniques.
+const VISITORS_TOOLTIP =
+  "Sum of each day's unique visitors. Someone who visits on several days is counted once per day, so multi-day totals run higher than true unique visitors.";
+
+/** The "~est" badge for a metric derived from sampled (not exact) data. */
+function sampledBadge(sampled: boolean): string {
+  return sampled
+    ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
+    : "";
+}
+
 function statCardsHtml(cards: StatCards, sampled: boolean): string {
   // `tip` carries an honest caveat for the metrics that are not exact counts.
   // Rendered as a native title tooltip on an ⓘ glyph (no JS — CSP-safe).
   const items: { label: string; value: string; tip?: string }[] = [
-    {
-      label: "Visitors",
-      value: fmtNum(cards.visitors),
-      tip: "Sum of each day's unique visitors. Someone who visits on several days is counted once per day, so multi-day totals run higher than true unique visitors.",
-    },
+    { label: "Visitors", value: fmtNum(cards.visitors), tip: VISITORS_TOOLTIP },
     { label: "Pageviews", value: fmtNum(cards.pageviews) },
     { label: "Views / Visitor", value: cards.viewsPerVisitor.toFixed(1) },
     {
@@ -569,9 +599,7 @@ function statCardsHtml(cards: StatCards, sampled: boolean): string {
       tip: "Approximate. Estimated from pageviews and visitors, not per-session tracking.",
     },
   ];
-  const badge = sampled
-    ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
-    : "";
+  const badge = sampledBadge(sampled);
   const cardsHtml = items
     .map(
       ({ label, value, tip }) =>
@@ -793,10 +821,12 @@ function breakdownTable(
   rows: BreakdownRow[],
 ): string {
   const headerCells = columns
-    .map(
-      (c) =>
-        `<span style="flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};">${esc(c.label)}</span>`,
-    )
+    .map((c) => {
+      // Visitors here is the same daily-summed figure as the Overview stat
+      // card — carry the same honest caveat as a native tooltip.
+      const titleAttr = c.key === "visitors" ? ` title="${esc(VISITORS_TOOLTIP)}"` : "";
+      return `<span style="flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};"${titleAttr}>${esc(c.label)}</span>`;
+    })
     .join("");
 
   const rowsHtml = rows
@@ -810,8 +840,11 @@ function breakdownTable(
               : c.key === "pageviews" || c.key === "visitors"
                 ? fmtNum(raw as number)
                 : esc(String(raw));
+          // Surface the per-row sampled flag on the Visitors cell — a row
+          // built from sampled event data is not an exact count.
+          const badge = c.key === "visitors" ? sampledBadge(r.sampled) : "";
           const mono = c.mono ? "font-family:'JetBrains Mono',monospace;" : "";
-          return `<span style="${mono}flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};color:${c.key === "label" ? "#cfd4e0" : c.key === "visitors" ? "#fff" : "#9aa1b2"};">${val}</span>`;
+          return `<span style="${mono}flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};color:${c.key === "label" ? "#cfd4e0" : c.key === "visitors" ? "#fff" : "#9aa1b2"};">${val}${badge}</span>`;
         })
         .join("");
       return `<div style="display:flex;align-items:center;padding:15px 24px;border-bottom:1px solid #161a22;font-size:13.5px;">${cells}</div>`;
@@ -1093,9 +1126,12 @@ dashboard.post("/login", async (c) => {
   const email = (form.get("email") as string | null)?.trim() ?? "";
   const password = (form.get("password") as string | null) ?? "";
 
-  const valid =
-    email.toLowerCase() === owner.email.toLowerCase() &&
-    (await verifyPassword(password, owner.pw_hash));
+  // Always pay the PBKDF2 cost, even on an email mismatch — checking
+  // `emailMatches && verifyPassword(...)` would short-circuit on mismatch,
+  // making the response time an oracle for whether an email is the owner's.
+  const emailMatches = email.toLowerCase() === owner.email.toLowerCase();
+  const passwordOk = await verifyPassword(password, emailMatches ? owner.pw_hash : DUMMY_PW_HASH);
+  const valid = emailMatches && passwordOk;
 
   if (!valid) {
     return c.html(loginPage(nonce, "Invalid email or password."), 401);
@@ -1369,7 +1405,9 @@ dashboard.get("/app/geography", async (c) => {
     .join("\n");
 
   // Build jsVectorMap values JSON for the map
-  const mapValues = JSON.stringify(Object.fromEntries(rows.map((r) => [r.label, r.visitors])));
+  // jsonForScript, not JSON.stringify: a country label lands inline in a
+  // <script> block, and JSON.stringify does not neutralize "</script>".
+  const mapValues = jsonForScript(Object.fromEntries(rows.map((r) => [r.label, r.visitors])));
 
   const content = `
     <link rel="stylesheet" href="/vendor/jsvectormap@1.6.0/jsvectormap.min.css">
