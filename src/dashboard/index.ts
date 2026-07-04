@@ -137,6 +137,13 @@ function parseCookies(header: string | null): Record<string, string> {
   );
 }
 
+// The Workers runtime caps PBKDF2 at 100k iterations — a runtime policy, not
+// a compat-dated behavior (enforcement reached production ~2026-07 and turned
+// every login into a 500 while this code asked for 210k). Local workerd does
+// NOT enforce the cap, so tests can't catch a raise; the verify clamp below is
+// the guard. Higher work factors aren't available in Workers WebCrypto.
+const PBKDF2_ITERATIONS = 100_000;
+
 async function hashPassword(password: string): Promise<string> {
   const enc = new TextEncoder();
   // Derive a 32-byte salt via random bytes, then PBKDF2 for the hash.
@@ -148,33 +155,55 @@ async function hashPassword(password: string): Promise<string> {
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
     keyMaterial,
     256,
   );
   const hashHex = Array.from(new Uint8Array(bits))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `pbkdf2:${saltHex}:${hashHex}`;
+  return `pbkdf2:${PBKDF2_ITERATIONS}:${saltHex}:${hashHex}`;
 }
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
   if (!stored.startsWith("pbkdf2:")) return false;
   const parts = stored.split(":");
-  if (parts.length !== 3) return false;
-  // After length check, indices 1 and 2 exist; cast away undefined.
-  const saltHex = parts[1] as string;
-  const expectedHex = parts[2] as string;
+  let iterations: number;
+  let saltHex: string;
+  let expectedHex: string;
+  if (parts.length === 4) {
+    // v2 format: pbkdf2:<iterations>:<salt>:<hash>
+    iterations = Number(parts[1]);
+    saltHex = parts[2] as string;
+    expectedHex = parts[3] as string;
+  } else if (parts.length === 3) {
+    // Legacy v1 format (no embedded count): those hashes were derived at 100k.
+    iterations = 100_000;
+    saltHex = parts[1] as string;
+    expectedHex = parts[2] as string;
+  } else {
+    return false;
+  }
+  // Never derive above the runtime cap — deriveBits would throw in production
+  // (NotSupportedError), turning a bad stored hash into a 500 instead of a 401.
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100_000) return false;
   const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, [
     "deriveBits",
   ]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" },
-    keyMaterial,
-    256,
-  );
+  let bits: ArrayBuffer;
+  try {
+    bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+      keyMaterial,
+      256,
+    );
+  } catch {
+    // Any future runtime policy change degrades to "invalid credentials",
+    // never a 500.
+    return false;
+  }
   const hashHex = Array.from(new Uint8Array(bits))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -217,7 +246,7 @@ function jsonForScript(v: unknown): string {
 // once with hashPassword(); the password behind it was discarded and is
 // never a real account's.
 const DUMMY_PW_HASH =
-  "pbkdf2:f8e2f6592433638278ecae10877afe6f:b3c2bc9287a57b06ecb5f1ed2c9ced7608c471fe32555544c450b5bea39bd285";
+  "pbkdf2:100000:524fefbac9c6134c2670b09d5e378de5:35fbc1405f9293d4a7caff3c4a0cb75beb6999be6b2e9ee09e775e1f3726388a";
 
 // ---------------------------------------------------------------------------
 // Date-range helpers
