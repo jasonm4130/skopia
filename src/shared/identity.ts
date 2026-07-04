@@ -75,10 +75,14 @@ export async function getDailySalt(kv: KVNamespace, day: string): Promise<string
   let salt = "";
   for (const b of random) salt += b.toString(16).padStart(2, "0");
 
-  // TTL = 25 h (ADR-0011): the date-keyed salt is only needed for its own UTC
-  // day; ~25 h self-deletion preserves the ~24 h cross-day-correlation window
-  // the cron's explicit delete previously provided.
-  await kv.put(key, salt, { expirationTtl: 25 * 60 * 60 });
+  // TTL (ADR-0011): the salt is only needed for its own UTC day, so expire
+  // ~1 h after that day ends — anchored to the day boundary, NOT creation
+  // time, so a salt first requested late in its day cannot linger through
+  // most of the next one (preserves the ~24 h correlation window the cron's
+  // explicit next-day delete previously provided).
+  const dayEndMs = Date.parse(`${day}T00:00:00Z`) + 24 * 60 * 60 * 1000;
+  const ttl = Math.max(60 * 60, Math.ceil((dayEndMs - Date.now()) / 1000) + 60 * 60);
+  await kv.put(key, salt, { expirationTtl: ttl });
   return salt;
 }
 

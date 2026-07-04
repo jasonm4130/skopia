@@ -861,3 +861,15 @@ describe("handleCollect — input validation bounds (Task 8)", () => {
     expect(res.status).toBe(413);
   });
 });
+
+// Controller adjudication of the Task-7 plan-conflict (unbounded-cache-growth):
+// site_id is the key of the per-isolate site cache; without a length bound an
+// attacker can flood distinct multi-KB ids. 64 matches validateSiteId's bound.
+describe("handleCollect — site_id length bound", () => {
+  it("rejects a site_id longer than 64 chars with 400", async () => {
+    const req = makeBeaconRequest({ t: "pv", p: "/", s: "a".repeat(65) });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(400);
+  });
+});

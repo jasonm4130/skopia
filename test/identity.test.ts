@@ -93,12 +93,21 @@ describe("getDailySalt", () => {
     expect(typeof s2).toBe("string");
   });
 
-  it("stores a new salt with a 25h self-expiring TTL", async () => {
-    const putSpy = vi.spyOn(env.SALT, "put");
-    await getDailySalt(env.SALT, "2026-06-28");
-    expect(putSpy).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
-      expirationTtl: 25 * 60 * 60,
-    });
+  it("stores a new salt expiring ~1h after its UTC day ends, not 25h from creation", async () => {
+    // Anchored to the day boundary: a salt first requested at 18:00Z must not
+    // survive most of the NEXT day (controller adjudication of the Task-12
+    // privacy-window-widening plan-conflict).
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-28T18:00:00Z")); // 6h left in the day
+      const putSpy = vi.spyOn(env.SALT, "put");
+      await getDailySalt(env.SALT, "2026-06-28");
+      expect(putSpy).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+        expirationTtl: 7 * 60 * 60, // 6h remaining + 1h grace
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

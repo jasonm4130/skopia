@@ -589,3 +589,39 @@ describe("SiteLive alarm reschedule + lazy eviction (Task 3)", () => {
     }
   });
 });
+
+// Controller adjudication of the Task-3 plan-conflict (unbounded-growth-risk):
+// a busy site with continuous events but no dashboard ever connected keeps the
+// DO warm (no hibernation reset) and never calls currentSnapshot(), so lazy
+// read-time eviction alone lets `visitors` grow unbounded. The alarm already
+// fires on every flush for exactly that traffic pattern — it must sweep too.
+describe("SiteLive alarm evicts stale visitors on the busy-site path", () => {
+  it("prunes past-TTL visitors during a flush alarm with no dashboard connected", async () => {
+    const stub = stubFor("alarm-sweep-1");
+    const site = "alarm-sweep-1-site";
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: site })),
+    });
+    // Age v1 past VISITOR_TTL_MS (5 min) without faking global timers.
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as { visitors: Map<string, { lastSeen: number }> };
+      const entry = i.visitors.get("v1");
+      if (entry) entry.lastSeen = Date.now() - 6 * 60 * 1000;
+    });
+    // Fresh event keeps pending non-empty so the alarm has a reason to run.
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v2", path: "/b", siteId: site })),
+    });
+    await runDurableObjectAlarm(stub);
+
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as { visitors: Map<string, unknown> };
+      expect(i.visitors.has("v1")).toBe(false);
+      expect(i.visitors.has("v2")).toBe(true);
+    });
+  });
+});

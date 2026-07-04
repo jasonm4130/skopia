@@ -43,6 +43,7 @@ const CORS_HEADERS_BASE = {
 type SiteInfo = { allowlist: string[]; domain: string };
 
 const SITE_CACHE_TTL_MS = 60_000;
+const SITE_CACHE_MAX = 1024;
 const siteCache = new Map<string, { site: SiteInfo | null; at: number }>();
 
 let saltMemo: { day: string; salt: string } | null = null;
@@ -80,6 +81,12 @@ async function getSiteAllowlist(env: Env, siteId: string): Promise<SiteInfo | nu
           domain: row.domain ?? "",
         };
 
+  // Bound the cache: distinct bogus site ids on this open endpoint must not
+  // grow the isolate heap without limit. A full reset beats LRU bookkeeping at
+  // this size — worst case is one extra D1 read per real site after a flood.
+  if (siteCache.size >= SITE_CACHE_MAX && !siteCache.has(siteId)) {
+    siteCache.clear();
+  }
   siteCache.set(siteId, { site, at: now });
   return site;
 }
@@ -200,6 +207,7 @@ export async function handleCollect(
   if (
     !siteId ||
     typeof siteId !== "string" ||
+    siteId.length > 64 ||
     !beacon.t ||
     (beacon.t !== "pv" && beacon.t !== "event") ||
     !beacon.p ||

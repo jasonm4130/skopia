@@ -235,8 +235,9 @@ heatmaps + revenue) — that is *their* bloat and *our* contrast (`roadmap-input
 - **O5 — Free-tier number (tech lead).** Measured via Phase-2 prep: the multiplier is traffic-shape
   dependent (≈ 2.25×–7×), so the ceiling is a **range, not a point**. **RESOLVED 2026-07-04:**
   DO rows-written (100k/day free) is the binding limit. Publish: **~500k pageviews/month safe across
-  all traffic shapes, up to ~0.9M for typical returning/multi-page sites**. Assumes the ~5× per-pageview
-  multiplier post-Task-3. *Cite:* `docs/research/2026-07-04-do-counters-design-iteration.md` §2.
+  all traffic shapes, up to ~0.9M for typical returning/multi-page sites**. The ~0.9M ceiling is
+  governed by the ≈3.25× at-scale multiplier; the measured ~5× is the low-traffic single-page
+  profile after the alarm-decouple fix (Task 3). *Cite:* `docs/research/2026-07-04-do-counters-design-iteration.md` §2.
 - **O6 — Sessionization cost/design (tech lead, ADR #11).** The funnels L-estimate depends on the
   chosen sessionization design (DO per-visitor vs D1 sessions table) and its per-event cost. This is
   the single biggest unknown gating Theme C; commission it early (Theme B window).

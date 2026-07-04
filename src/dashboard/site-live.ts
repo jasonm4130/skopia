@@ -345,6 +345,10 @@ export class SiteLive extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     await this.flush();
 
+    // Sweep the live map while we are here (busy-site growth bound — see
+    // evictStale). Costs no extra writes: this alarm was armed by `pending`.
+    this.evictStale();
+
     // After a clean flush (nothing still owed), lazily prune the durable `seen`
     // set of past days — at most one DELETE per UTC day per instance. Guarded on
     // an empty `pending` so a failed flush never drops seen rows a retry needs.
@@ -374,17 +378,25 @@ export class SiteLive extends DurableObject<Env> {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  private currentSnapshot(): LiveSnapshot {
-    // Lazy eviction (Task 3): the flush alarm no longer evicts, so staleness is
-    // resolved here instead — the live count is correct at every read. `visitors`
-    // is RAM-only and hibernation clears it naturally, so leaving stale entries
-    // between reads is not unbounded growth, just a bounded staleness window.
+  /**
+   * Drop live-map entries older than VISITOR_TTL_MS. Called on every read
+   * (snapshot) and on every flush alarm: a busy site with no dashboard
+   * connected keeps the DO warm indefinitely (no hibernation reset) and never
+   * snapshots, so the alarm — already armed by `pending` on exactly that
+   * traffic — is what bounds `visitors` growth there.
+   */
+  private evictStale(): void {
     const cutoff = Date.now() - VISITOR_TTL_MS;
     for (const [vid, entry] of this.visitors) {
       if (entry.lastSeen < cutoff) {
         this.visitors.delete(vid);
       }
     }
+  }
+
+  private currentSnapshot(): LiveSnapshot {
+    // Read-time eviction (Task 3): the live count is correct at every read.
+    this.evictStale();
 
     const pageCounts = new Map<string, number>();
     for (const { path } of this.visitors.values()) {
