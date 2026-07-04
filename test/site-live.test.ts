@@ -420,3 +420,115 @@ describe("SiteLive durability across hibernation", () => {
     expect(row?.pageviews).toBe(1); // NOT 2 — the flushed delta was not re-applied
   });
 });
+
+// Task 2: flush is subtractive (subtract-what-was-committed) and persists after
+// EACH committed chunk. This fixes two additive-UPSERT hazards: (a) an event that
+// interleaves during the D1 subrequest (the input gate stays OPEN across the
+// await) must not be wiped by a clear-on-success; (b) a multi-chunk flush whose
+// second chunk fails must not re-apply the already-committed first chunk on retry.
+describe("SiteLive subtractive chunk-committed flush", () => {
+  it("keeps an event that arrives while a flush batch is in flight (counted once)", async () => {
+    const stub = stubFor("mf-1");
+    const site = "mf-site";
+    const day = utcDayUTC();
+
+    // Defer the FIRST batch so an event can interleave during the await, exactly
+    // as it can in production (D1 calls are subrequests; the DO input gate stays
+    // open). Later calls run the real batch immediately.
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      releaseGate = r;
+    });
+    const realBatch = env.DB.batch.bind(env.DB);
+    let calls = 0;
+    const spy = vi.spyOn(env.DB, "batch").mockImplementation(async (stmts) => {
+      calls++;
+      if (calls === 1) await gate;
+      return realBatch(stmts);
+    });
+
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const i = instance as unknown as {
+          recordEvent(e: CountEvent): Promise<void>;
+          flush(): Promise<void>;
+          alarm(): Promise<void>;
+        };
+        await i.recordEvent(evt({ vid: "v1", path: "/a", siteId: site }));
+
+        const flushing = i.flush(); // batch 1 blocks on the gate
+        await i.recordEvent(evt({ vid: "v2", path: "/a", siteId: site })); // mid-flight
+        releaseGate(); // let batch 1 commit
+        await flushing; // subtracts only the bound delta; the mid-flight one survives
+
+        await i.alarm(); // flushes the surviving mid-flight delta
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const row = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+    )
+      .bind(site, day)
+      .first<{ pageviews: number; visitors: number }>();
+    expect(row?.pageviews).toBe(2); // both events counted exactly once (no loss)
+    expect(row?.visitors).toBe(2); // v1 + v2, absolute from seen
+  });
+
+  it("retries only the uncommitted chunk after a partial batch failure (no double-count)", async () => {
+    const stub = stubFor("cp-1");
+    const site = "cp-site";
+    const day = utcDayUTC();
+    const N = 150; // 150 unique paths => >100 pending rows => two flush chunks
+
+    const realBatch = env.DB.batch.bind(env.DB);
+    let calls = 0;
+    const spy = vi.spyOn(env.DB, "batch").mockImplementation((stmts) => {
+      calls++;
+      if (calls === 2) throw new Error("chunk 2 boom"); // fail the 2nd chunk, once
+      return realBatch(stmts);
+    });
+
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const i = instance as unknown as {
+          recordEvent(e: CountEvent): Promise<void>;
+          alarm(): Promise<void>;
+          pending: Map<string, unknown>;
+        };
+        for (let n = 0; n < N; n++) {
+          await i.recordEvent(evt({ vid: "v1", path: `/p${n}`, siteId: site }));
+        }
+        await i.alarm(); // chunk 1 commits + is subtracted; chunk 2 throws, stays owed
+        expect(i.pending.size).toBeGreaterThan(0); // chunk 2 still pending
+        await i.alarm(); // retries ONLY the surviving chunk-2 rows
+        expect(i.pending.size).toBe(0);
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    // `total` is a chunk-1 row: committed once, never re-applied by the retry.
+    const total = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
+    )
+      .bind(site, day)
+      .first<{ pageviews: number }>();
+    expect(total?.pageviews).toBe(N);
+
+    // A chunk-1 page (/p0) and a chunk-2 page (/p149) each land exactly once.
+    const first = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p0'",
+    )
+      .bind(site, day)
+      .first<{ pageviews: number }>();
+    const last = await env.DB.prepare(
+      "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/p149'",
+    )
+      .bind(site, day)
+      .first<{ pageviews: number }>();
+    expect(first?.pageviews).toBe(1);
+    expect(last?.pageviews).toBe(1);
+  });
+});

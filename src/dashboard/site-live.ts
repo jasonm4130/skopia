@@ -229,24 +229,46 @@ export class SiteLive extends DurableObject<Env> {
     if (this.siteId === null || this.pending.size === 0) return;
     const site = this.siteId;
 
+    // Bind every pending row up front and remember the (key, delta) captured at
+    // bind time per statement. A committed chunk is SUBTRACTED from `pending`
+    // rather than clearing the whole map: D1 calls are subrequests, so the input
+    // gate stays OPEN across the await and an event can grow a row mid-flush —
+    // subtracting only the bound delta preserves that event's contribution.
     const stmts = [];
-    for (const { day, dimension, dimValue, delta } of this.pending.values()) {
+    const bound: { key: string; delta: number }[] = [];
+    for (const [key, { day, dimension, dimValue, delta }] of this.pending) {
       const visitors = this.countSeen(day, dimension, dimValue);
       stmts.push(
         this.env.DB.prepare(FLUSH_UPSERT).bind(site, day, dimension, dimValue, delta, visitors),
       );
+      bound.push({ key, delta });
     }
 
     try {
       for (let i = 0; i < stmts.length; i += 100) {
         await this.env.DB.batch(stmts.slice(i, i + 100));
+        // Committed: subtract exactly what this chunk wrote. A row that grew
+        // mid-flush keeps the remainder; a row drained to zero is removed.
+        for (const { key, delta } of bound.slice(i, i + 100)) {
+          const row = this.pending.get(key);
+          if (row) {
+            row.delta -= delta;
+            if (row.delta === 0) this.pending.delete(key);
+          }
+        }
+        // Persist the remainder after EACH chunk so a crash between chunks can
+        // re-apply at most this one chunk, never an already-committed one (the
+        // flush UPSERT is additive) — chunk-bounded ADR-0010 risk.
+        if (this.pending.size === 0) {
+          await this.ctx.storage.delete(FLUSH_STATE_KEY);
+        } else {
+          await this.persistPending();
+        }
       }
-      this.pending.clear(); // only on success — otherwise retry next alarm
-      // Drop the durable snapshot too, so a post-flush cold start can't re-apply
-      // these now-committed deltas (the flush UPSERT is additive) — ADR-0010.
-      await this.ctx.storage.delete(FLUSH_STATE_KEY);
     } catch {
-      // Leave pending intact; the next flush retries. WAE still holds the raw events.
+      // A chunk threw: stop. The remaining chunks stay in `pending` and the
+      // durable snapshot already reflects exactly what is still owed, so the
+      // next alarm retries them with no re-apply. WAE still holds the raw events.
     }
   }
 
