@@ -165,130 +165,150 @@ export async function handleCollect(
     });
   }
 
-  // ---------- 6. D1: single lookup for site existence + allowlist + domain (fix #6a: merged queries) ----------
-  const site = await getSiteAllowlist(env, siteId);
-
-  // null = site does not exist
-  if (site === null) {
-    return new Response(null, { status: 404, headers: origin ? corsHeaders(origin) : {} });
-  }
-
-  // ---------- 7. CORS: validate origin against per-site allowlist ----------
-  // Fix #2 (HIGH): if the site has a non-empty allowlist, requests with NO Origin
-  // header are also rejected — a headerless POST would bypass the allowlist entirely.
-  // Only open sites (empty allowlist) accept headerless requests.
-  if (site.allowlist.length > 0) {
-    if (!origin || !site.allowlist.includes(origin)) {
-      return new Response(null, { status: 403, headers: origin ? corsHeaders(origin) : {} });
-    }
-  }
-
-  // ---------- 8. Secret guard (fail-closed before any crypto) ----------
+  // ---------- 6-14. Site lookup onward (fix #6c: never let infra failures 5xx) ----------
+  // A transient D1/KV/crypto error here must not propagate to Hono's default
+  // 500 — that response carries no CORS headers, so a customer's browser
+  // console fills with CORS errors instead of a clean, silent drop. The
+  // deliberate non-204 responses below (404 unknown site, 403 origin, 503
+  // missing secret) are `return`s, not throws, so they keep working as-is.
   try {
-    requireSecrets(env, ["IDENTITY_HMAC_SECRET"]);
-  } catch (err) {
-    if (err instanceof SecretsMissingError) {
-      return new Response("collector not configured", {
-        status: 503,
-        headers: origin ? corsHeaders(origin) : {},
-      });
+    // ---------- 6. D1: single lookup for site existence + allowlist + domain (fix #6a: merged queries) ----------
+    const site = await getSiteAllowlist(env, siteId);
+
+    // null = site does not exist
+    if (site === null) {
+      return new Response(null, { status: 404, headers: origin ? corsHeaders(origin) : {} });
     }
-    throw err;
-  }
 
-  // ---------- 9. Cookieless identity ----------
-  const ip =
-    request.headers.get("CF-Connecting-IP") ?? request.headers.get("X-Forwarded-For") ?? "0.0.0.0";
-  const today = utcDay(new Date());
-  const salt = await getDailySalt(env.SALT, today);
-  const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
+    // ---------- 7. CORS: validate origin against per-site allowlist ----------
+    // Fix #2 (HIGH): if the site has a non-empty allowlist, requests with NO Origin
+    // header are also rejected — a headerless POST would bypass the allowlist entirely.
+    // Only open sites (empty allowlist) accept headerless requests.
+    if (site.allowlist.length > 0) {
+      if (!origin || !site.allowlist.includes(origin)) {
+        return new Response(null, { status: 403, headers: origin ? corsHeaders(origin) : {} });
+      }
+    }
 
-  // ---------- 10. Parse client-supplied fields ----------
-  // Task 4: internal navigations must not credit the site as its own referrer
-  // — normalize both sides (lowercase, strip one leading "www.") and collapse
-  // a same-domain match to "" (direct), same as no `r` at all. Sites with the
-  // default empty `domain` skip this (no behavior change).
-  const rawReferrerHost = parseReferrerHost(beacon.r);
-  const referrerHost =
-    site.domain && rawReferrerHost && normalizeHost(rawReferrerHost) === normalizeHost(site.domain)
-      ? ""
-      : rawReferrerHost;
-  const utm = parseUtm(beacon.p);
+    // ---------- 8. Secret guard (fail-closed before any crypto) ----------
+    try {
+      requireSecrets(env, ["IDENTITY_HMAC_SECRET"]);
+    } catch (err) {
+      if (err instanceof SecretsMissingError) {
+        return new Response("collector not configured", {
+          status: 503,
+          headers: origin ? corsHeaders(origin) : {},
+        });
+      }
+      throw err;
+    }
 
-  // Prefer UA-derived device class; fall back to screen-width bucket when UA says desktop
-  // (some mobile browsers identify as desktop — the screen width is the tiebreaker)
-  const deviceClass =
-    uaInfo.deviceClass !== "desktop" ? uaInfo.deviceClass : bucketScreenWidth(beacon.w);
+    // ---------- 9. Cookieless identity ----------
+    const ip =
+      request.headers.get("CF-Connecting-IP") ??
+      request.headers.get("X-Forwarded-For") ??
+      "0.0.0.0";
+    const today = utcDay(new Date());
+    const salt = await getDailySalt(env.SALT, today);
+    const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
 
-  // Serialize custom-event props (cap at MAX_PROPS_JSON_BYTES)
-  let propsJson = "";
-  if (beacon.d && Object.keys(beacon.d).length > 0) {
-    const raw = JSON.stringify(beacon.d);
-    propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
-  }
+    // ---------- 10. Parse client-supplied fields ----------
+    // Task 4: internal navigations must not credit the site as its own referrer
+    // — normalize both sides (lowercase, strip one leading "www.") and collapse
+    // a same-domain match to "" (direct), same as no `r` at all. Sites with the
+    // default empty `domain` skip this (no behavior change).
+    const rawReferrerHost = parseReferrerHost(beacon.r);
+    const referrerHost =
+      site.domain &&
+      rawReferrerHost &&
+      normalizeHost(rawReferrerHost) === normalizeHost(site.domain)
+        ? ""
+        : rawReferrerHost;
+    const utm = parseUtm(beacon.p);
 
-  // ---------- 11. Build WAE event ----------
-  const isPageview = beacon.t === "pv" ? 1 : 0;
-  const waeEvent: WaeEvent = {
-    siteId,
-    vid,
-    pathname: beacon.p,
-    referrerHost,
-    utmSource: utm.source,
-    utmMedium: utm.medium,
-    utmCampaign: utm.campaign,
-    country: cf.country,
-    deviceClass,
-    browser: uaInfo.browser,
-    os: uaInfo.os,
-    eventName: beacon.n ?? "",
-    entryPath: beacon.p, // MVP: entry path = current path (no session tracking)
-    propsJson,
-    count: 1,
-    isPageview: isPageview as 0 | 1,
-    screenWidth: beacon.w ?? 0,
-  };
+    // Prefer UA-derived device class; fall back to screen-width bucket when UA says desktop
+    // (some mobile browsers identify as desktop — the screen width is the tiebreaker)
+    const deviceClass =
+      uaInfo.deviceClass !== "desktop" ? uaInfo.deviceClass : bucketScreenWidth(beacon.w);
 
-  // ---------- 12. Write to WAE (synchronous) ----------
-  env.WAE.writeDataPoint(toDataPoint(waeEvent));
+    // Serialize custom-event props (cap at MAX_PROPS_JSON_BYTES)
+    let propsJson = "";
+    if (beacon.d && Object.keys(beacon.d).length > 0) {
+      const raw = JSON.stringify(beacon.d);
+      propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
+    }
 
-  // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
-  // One DO call per event drives BOTH the live count and the dimensional rollup
-  // (spec §3). The DO reads a JSON body — query-string params are not used.
-  const doId = env.SITE_LIVE.idFromName(siteId);
-  const doStub = env.SITE_LIVE.get(doId);
-  const eventBody = JSON.stringify({
-    siteId,
-    vid,
-    isPageview,
-    path: beacon.p ?? "/",
-    referrer: referrerHost,
-    utmSource: utm.source,
-    utmMedium: utm.medium,
-    utmCampaign: utm.campaign,
-    country: cf.country,
-    device: deviceClass,
-    browser: uaInfo.browser,
-    os: uaInfo.os,
-    eventName: beacon.n ?? "",
-  });
-  ctx.waitUntil(
-    doStub
-      .fetch(
-        new Request("https://do-internal/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: eventBody,
+    // ---------- 11. Build WAE event ----------
+    const isPageview = beacon.t === "pv" ? 1 : 0;
+    const waeEvent: WaeEvent = {
+      siteId,
+      vid,
+      pathname: beacon.p,
+      referrerHost,
+      utmSource: utm.source,
+      utmMedium: utm.medium,
+      utmCampaign: utm.campaign,
+      country: cf.country,
+      deviceClass,
+      browser: uaInfo.browser,
+      os: uaInfo.os,
+      eventName: beacon.n ?? "",
+      entryPath: beacon.p, // MVP: entry path = current path (no session tracking)
+      propsJson,
+      count: 1,
+      isPageview: isPageview as 0 | 1,
+      screenWidth: beacon.w ?? 0,
+    };
+
+    // ---------- 12. Write to WAE (synchronous) ----------
+    env.WAE.writeDataPoint(toDataPoint(waeEvent));
+
+    // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
+    // One DO call per event drives BOTH the live count and the dimensional rollup
+    // (spec §3). The DO reads a JSON body — query-string params are not used.
+    const doId = env.SITE_LIVE.idFromName(siteId);
+    const doStub = env.SITE_LIVE.get(doId);
+    const eventBody = JSON.stringify({
+      siteId,
+      vid,
+      isPageview,
+      path: beacon.p ?? "/",
+      referrer: referrerHost,
+      utmSource: utm.source,
+      utmMedium: utm.medium,
+      utmCampaign: utm.campaign,
+      country: cf.country,
+      device: deviceClass,
+      browser: uaInfo.browser,
+      os: uaInfo.os,
+      eventName: beacon.n ?? "",
+    });
+    ctx.waitUntil(
+      doStub
+        .fetch(
+          new Request("https://do-internal/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: eventBody,
+          }),
+        )
+        .catch(() => {
+          // DO is best-effort; WAE already holds the durable copy.
         }),
-      )
-      .catch(() => {
-        // DO is best-effort; WAE already holds the durable copy.
-      }),
-  );
+    );
 
-  // ---------- 14. Respond 204 ----------
-  return new Response(null, {
-    status: 204,
-    headers: origin ? corsHeaders(origin) : {},
-  });
+    // ---------- 14. Respond 204 ----------
+    return new Response(null, {
+      status: 204,
+      headers: origin ? corsHeaders(origin) : {},
+    });
+  } catch (err) {
+    // Cold-schema consequence: on a fresh deploy that has never served a
+    // dashboard request, `sites` doesn't exist yet and getSiteAllowlist throws
+    // "no such table" — it lands here and is silently dropped as 204 (was a
+    // 500). Acceptable until the dashboard's ensureSchema runs; do NOT add a
+    // per-request ensureSchema call to this hot path to "fix" it.
+    console.error("collector error", err);
+    return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} });
+  }
 }

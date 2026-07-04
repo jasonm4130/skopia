@@ -270,6 +270,33 @@ describe("handleCollect — secret guard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Collect — infra resilience (Task 6: beacon path must never 5xx)
+// ---------------------------------------------------------------------------
+describe("handleCollect — infra resilience (never 5xx)", () => {
+  it("returns 204 with CORS headers when the D1 site lookup throws", async () => {
+    // Simulate a transient D1 outage at the site-lookup query. Pre-fix this
+    // propagates to Hono's bare 500 (no CORS headers); post-fix it must be
+    // caught and answered as a silent 204.
+    vi.spyOn(env.DB, "prepare").mockImplementation(() => {
+      throw new Error("D1 unavailable (simulated)");
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Collect — WAE writeDataPoint blob/double mapping
 // ---------------------------------------------------------------------------
 describe("handleCollect — WAE slot mapping", () => {

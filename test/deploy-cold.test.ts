@@ -101,19 +101,39 @@ function makeCollectorRequest(siteId = "default"): Request {
 // register the test site. The migration no longer seeds a demo site, so the
 // collector's 404-on-unknown-site check would otherwise fire before the secret
 // guard we're exercising here.
+//
+// Scoped to a helper (not a blanket top-level `beforeEach`) so the
+// "missing order" describe below — which must run against genuinely
+// unmigrated D1 — can opt out of it entirely.
 let schemaReady = false;
-beforeEach(async () => {
-  if (!schemaReady) {
-    await ensureSchema(env.DB as D1Database);
-    await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
-      .bind("default", "Cold Test Site", "")
-      .run();
-    schemaReady = true;
-  }
+async function ensureColdSchemaOnce(): Promise<void> {
+  if (schemaReady) return;
+  await ensureSchema(env.DB as D1Database);
+  await env.DB.prepare("INSERT OR IGNORE INTO sites (id, name, domain) VALUES (?, ?, ?)")
+    .bind("default", "Cold Test Site", "")
+    .run();
+  schemaReady = true;
+}
+
+beforeEach(() => {
   vi.mocked(queries.getOwner).mockResolvedValue(null); // default: no owner (cold account)
 });
 
+// Task 6: on a genuinely fresh deploy, a beacon can arrive before anything
+// has ever called `ensureSchema` (no dashboard visit yet) — the `sites` table
+// doesn't exist. This describe deliberately runs first in the file and never
+// calls `ensureColdSchemaOnce()`, so it exercises the real "no such table"
+// error path instead of a mocked one.
+describe("cold-account: collector — beacon before any ensureSchema call (missing order)", () => {
+  it("returns 204 (not 500) when the schema has never been bootstrapped", async () => {
+    const res = await workerFetch(makeCollectorRequest());
+    expect(res.status).toBe(204);
+  });
+});
+
 describe("cold-account: collector", () => {
+  beforeEach(ensureColdSchemaOnce);
+
   it("returns 503 (not 500) when IDENTITY_HMAC_SECRET is unset", async () => {
     const coldEnv = makeEnv({ IDENTITY_HMAC_SECRET: "" });
     const res = await workerFetch(makeCollectorRequest(), coldEnv);
