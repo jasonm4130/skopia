@@ -729,3 +729,135 @@ describe("POST /e — CSP exemption (Task 7)", () => {
     expect(res.headers.get("Content-Security-Policy")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Collect — input validation bounds (Task 8)
+// ---------------------------------------------------------------------------
+describe("handleCollect — input validation bounds (Task 8)", () => {
+  it("omits an invalid `w` (object) instead of writing NaN into the WAE data point", async () => {
+    const writes: Array<{ doubles: number[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { doubles: number[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", w: {} },
+      { origin: "https://example.com", ip: "198.51.100.20" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.doubles.some((d) => Number.isNaN(d))).toBe(false);
+    // Double3 = screen_width — falls back to 0 rather than NaN.
+    expect(writes[0]?.doubles[2]).toBe(0);
+
+    vi.restoreAllMocks();
+  });
+
+  it("truncates an oversized custom-event name to 128 chars", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const longName = "n".repeat(2000);
+    const req = makeBeaconRequest(
+      { t: "event", s: "test-site", p: "/", n: longName },
+      { origin: "https://example.com", ip: "198.51.100.21" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    // Blob11 = event_name
+    expect(writes[0]?.blobs[10]).toBe(longName.slice(0, 128));
+    expect(writes[0]?.blobs[10]).toHaveLength(128);
+
+    vi.restoreAllMocks();
+  });
+
+  it("truncates an oversized pathname to 512 chars", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const longPath = `/${"p".repeat(2000)}`;
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: longPath },
+      { origin: "https://example.com", ip: "198.51.100.22" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    // Blob2 = pathname
+    expect(writes[0]?.blobs[1]).toBe(longPath.slice(0, 512));
+    expect(writes[0]?.blobs[1]).toHaveLength(512);
+
+    vi.restoreAllMocks();
+  });
+
+  it("ignores `n` on a pageview beacon — no event dimension contribution", async () => {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("pv-fake-event-site", "PV Fake Event Site", "pvfakeevent.com", "")
+      .run();
+
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const ctx = createExecutionContext();
+    const res = await handleCollect(
+      makeBeaconRequest(
+        { t: "pv", s: "pv-fake-event-site", p: "/", n: "fake-event" },
+        { ip: "198.51.100.23" },
+      ),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    // Blob11 = event_name — must stay empty; a pv beacon cannot inject an event name.
+    expect(writes[0]?.blobs[10]).toBe("");
+
+    const { runDurableObjectAlarm } = await import("cloudflare:test");
+    const stub = env.SITE_LIVE.get(env.SITE_LIVE.idFromName("pv-fake-event-site"));
+    await runDurableObjectAlarm(stub);
+
+    const eventRow = await env.DB.prepare(
+      "SELECT dim_value FROM rollup_daily_shadow WHERE site_id=? AND dimension='event'",
+    )
+      .bind("pv-fake-event-site")
+      .first();
+    expect(eventRow).toBeNull();
+
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a body over 2048 UTF-8 bytes even when under 2048 UTF-16 code units (CJK)", async () => {
+    // Each hiragana character is 1 UTF-16 code unit but 3 UTF-8 bytes: 700
+    // of them is ~734 chars (well under a code-unit-based 2048 cap) but
+    // ~2134 bytes on the wire (over a byte-based 2048 cap).
+    const cjk = "あ".repeat(700);
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: `/${cjk}` },
+      { origin: "https://example.com", ip: "198.51.100.24" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+
+    expect(res.status).toBe(413);
+  });
+});

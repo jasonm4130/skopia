@@ -133,8 +133,33 @@ function toDataPoint(event: WaeEvent): { indexes: [string]; blobs: string[]; dou
 // Main collect handler
 // ---------------------------------------------------------------------------
 
-const MAX_BODY_BYTES = 2048; // 2 KB payload cap (spec §3.2)
+const MAX_CONTENT_LENGTH_BYTES = 4096; // fast pre-parse rejection on the raw header
+const MAX_BODY_BYTES = 2048; // 2 KB payload cap (spec §3.2), measured in UTF-8 bytes
 const MAX_PROPS_JSON_BYTES = 512; // cap on serialized custom-event props
+const MAX_PATH_CHARS = 512; // bound `p` before it becomes a rollup dim_value
+const MAX_REFERRER_CHARS = 1024; // bound `r` before host parsing
+const MAX_EVENT_NAME_CHARS = 128; // bound `n` before it becomes a rollup dim_value
+const MAX_SCREEN_WIDTH = 32767; // `w` outside (0, 32767] or non-finite is dropped, not stored
+
+// ---------------------------------------------------------------------------
+// Task 8: bound what a stranger can put in a beacon
+//
+// Every client-supplied string is truncated (never dropped — an oversized
+// field is still a real event) and `w` is type/range-checked so a malformed
+// value can never reach `Number()` as NaN in the WAE data point.
+// ---------------------------------------------------------------------------
+
+/** Truncate a client-supplied string to bound the storage/rollup row it becomes. */
+function truncate(value: string, maxChars: number): string {
+  return value.length > maxChars ? value.slice(0, maxChars) : value;
+}
+
+/** `w` must be a finite, in-range number, or it's omitted entirely (no NaN reaches WAE). */
+function validScreenWidth(w: unknown): number | undefined {
+  return typeof w === "number" && Number.isFinite(w) && w > 0 && w <= MAX_SCREEN_WIDTH
+    ? w
+    : undefined;
+}
 
 /** Handle a `POST /e` beacon: validate, enrich, identity, WAE write, live bump. */
 export async function handleCollect(
@@ -152,7 +177,7 @@ export async function handleCollect(
 
   // ---------- 1. Validate payload size ----------
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_BODY_BYTES) {
+  if (contentLength > MAX_CONTENT_LENGTH_BYTES) {
     return new Response(null, { status: 413, headers: origin ? corsHeaders(origin) : {} });
   }
 
@@ -160,7 +185,9 @@ export async function handleCollect(
   let beacon: Beacon;
   try {
     const text = await request.text();
-    if (text.length > MAX_BODY_BYTES) {
+    // Byte length, not `.length` (UTF-16 code units) — a 2048-char CJK body is
+    // ~6 KB on the wire and must not sail past a code-unit-based cap.
+    if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
       return new Response(null, { status: 413, headers: origin ? corsHeaders(origin) : {} });
     }
     beacon = JSON.parse(text) as Beacon;
@@ -185,6 +212,16 @@ export async function handleCollect(
   if (beacon.t === "event" && (!beacon.n || typeof beacon.n !== "string")) {
     return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
   }
+
+  // ---------- 3b. Bound client-supplied fields (truncate, don't drop; Task 8) ----------
+  const isEvent = beacon.t === "event";
+  const pathname = truncate(beacon.p, MAX_PATH_CHARS);
+  const referrerRaw =
+    typeof beacon.r === "string" ? truncate(beacon.r, MAX_REFERRER_CHARS) : undefined;
+  const screenWidth = validScreenWidth(beacon.w);
+  // `n`/`d` only apply to real events — a hand-crafted pv beacon must not be
+  // able to inject a row into the events breakdown.
+  const eventName = isEvent ? truncate(beacon.n ?? "", MAX_EVENT_NAME_CHARS) : "";
 
   // ---------- 4. Enrich from CF + UA (fix #6b: before D1 queries so bots cost no D1 reads) ----------
   const cf = enrichFromCf(request);
@@ -251,23 +288,24 @@ export async function handleCollect(
     // — normalize both sides (lowercase, strip one leading "www.") and collapse
     // a same-domain match to "" (direct), same as no `r` at all. Sites with the
     // default empty `domain` skip this (no behavior change).
-    const rawReferrerHost = parseReferrerHost(beacon.r);
+    const rawReferrerHost = parseReferrerHost(referrerRaw);
     const referrerHost =
       site.domain &&
       rawReferrerHost &&
       normalizeHost(rawReferrerHost) === normalizeHost(site.domain)
         ? ""
         : rawReferrerHost;
-    const utm = parseUtm(beacon.p);
+    const utm = parseUtm(pathname);
 
     // Prefer UA-derived device class; fall back to screen-width bucket when UA says desktop
     // (some mobile browsers identify as desktop — the screen width is the tiebreaker)
     const deviceClass =
-      uaInfo.deviceClass !== "desktop" ? uaInfo.deviceClass : bucketScreenWidth(beacon.w);
+      uaInfo.deviceClass !== "desktop" ? uaInfo.deviceClass : bucketScreenWidth(screenWidth);
 
-    // Serialize custom-event props (cap at MAX_PROPS_JSON_BYTES)
+    // Serialize custom-event props (cap at MAX_PROPS_JSON_BYTES); `d` only
+    // applies to real events (Task 8) — same reasoning as `eventName` above.
     let propsJson = "";
-    if (beacon.d && Object.keys(beacon.d).length > 0) {
+    if (isEvent && beacon.d && Object.keys(beacon.d).length > 0) {
       const raw = JSON.stringify(beacon.d);
       propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
     }
@@ -277,7 +315,7 @@ export async function handleCollect(
     const waeEvent: WaeEvent = {
       siteId,
       vid,
-      pathname: beacon.p,
+      pathname,
       referrerHost,
       utmSource: utm.source,
       utmMedium: utm.medium,
@@ -286,12 +324,12 @@ export async function handleCollect(
       deviceClass,
       browser: uaInfo.browser,
       os: uaInfo.os,
-      eventName: beacon.n ?? "",
-      entryPath: beacon.p, // MVP: entry path = current path (no session tracking)
+      eventName,
+      entryPath: pathname, // MVP: entry path = current path (no session tracking)
       propsJson,
       count: 1,
       isPageview: isPageview as 0 | 1,
-      screenWidth: beacon.w ?? 0,
+      screenWidth: screenWidth ?? 0,
     };
 
     // ---------- 12. Write to WAE (synchronous) ----------
@@ -306,7 +344,7 @@ export async function handleCollect(
       siteId,
       vid,
       isPageview,
-      path: beacon.p ?? "/",
+      path: pathname,
       referrer: referrerHost,
       utmSource: utm.source,
       utmMedium: utm.medium,
@@ -315,7 +353,7 @@ export async function handleCollect(
       device: deviceClass,
       browser: uaInfo.browser,
       os: uaInfo.os,
-      eventName: beacon.n ?? "",
+      eventName,
     });
     ctx.waitUntil(
       doStub
