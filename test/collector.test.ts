@@ -383,6 +383,138 @@ describe("handleCollect — WAE slot mapping", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Collect — referrer honesty (self-referral filter)
+// ---------------------------------------------------------------------------
+describe("handleCollect — referrer honesty (self-referral filter)", () => {
+  it("treats own-domain referrer as direct (empty blob)", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    // 'test-site' has domain="example.com" (seeded in beforeAll).
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://example.com/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.1" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("treats own-domain referrer with a leading www. as direct", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://www.example.com/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.2" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("treats own-domain referrer with mixed case as direct", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://EXAMPLE.COM/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.3" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("leaves an external referrer unchanged", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://www.google.com/search" },
+      { origin: "https://example.com", ip: "198.51.100.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("www.google.com");
+
+    vi.restoreAllMocks();
+  });
+
+  it("skips the filter entirely for a site with the default empty domain", async () => {
+    // 'open-site' domain is intentionally overwritten to empty to exercise the
+    // no-domain-configured path (fix should not treat "" as matching anything).
+    await env.DB.prepare("UPDATE sites SET domain = '' WHERE id = ?").bind("open-site").run();
+
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "open-site", p: "/", r: "https://open.com/other-page" },
+      { ip: "198.51.100.5" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("open.com");
+
+    vi.restoreAllMocks();
+    // Restore for any other test relying on open-site's domain.
+    await env.DB.prepare("UPDATE sites SET domain = 'open.com' WHERE id = ?")
+      .bind("open-site")
+      .run();
+  });
+
+  it("performs exactly one D1 query for the site lookup", async () => {
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://example.com/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.6" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Live count (SiteLive DO bump)
 // ---------------------------------------------------------------------------
 describe("handleCollect — SiteLive DO bump", () => {

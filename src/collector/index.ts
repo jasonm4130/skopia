@@ -30,27 +30,38 @@ const CORS_HEADERS_BASE = {
 } as const;
 
 /**
- * Fetch the per-site origin allowlist from D1 in one query.
+ * Fetch the per-site origin allowlist + domain from D1 in one query.
  *
  * Fix #6a (MED): merged the two former D1 lookups (origin_allowlist fetch +
- * existence check) into a single SELECT. Returns null when the site does not
- * exist, [] when it exists but has no/empty allowlist, or the list of origins.
+ * existence check) into a single SELECT. Also carries `domain` (Task 4) so the
+ * referrer self-referral filter needs no second read. Returns null when the
+ * site does not exist.
  */
-async function getSiteAllowlist(env: Env, siteId: string): Promise<string[] | null> {
-  const row = await env.DB.prepare("SELECT origin_allowlist FROM sites WHERE id = ?")
+async function getSiteAllowlist(
+  env: Env,
+  siteId: string,
+): Promise<{ allowlist: string[]; domain: string } | null> {
+  const row = await env.DB.prepare("SELECT origin_allowlist, domain FROM sites WHERE id = ?")
     .bind(siteId)
-    .first<{ origin_allowlist: string | null }>();
+    .first<{ origin_allowlist: string | null; domain: string | null }>();
 
   // null row → site does not exist
   if (row === null) return null;
 
-  // Row exists but allowlist is empty or null → open site
-  if (!row.origin_allowlist) return [];
+  const allowlist = row.origin_allowlist
+    ? row.origin_allowlist
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [];
 
-  return row.origin_allowlist
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
+  return { allowlist, domain: row.domain ?? "" };
+}
+
+/** Lowercase and strip one leading "www." for host-vs-host comparison. */
+function normalizeHost(host: string): string {
+  const lower = host.toLowerCase();
+  return lower.startsWith("www.") ? lower.slice(4) : lower;
 }
 
 function corsHeaders(origin: string): Record<string, string> {
@@ -154,11 +165,11 @@ export async function handleCollect(
     });
   }
 
-  // ---------- 6. D1: single lookup for site existence + allowlist (fix #6a: merged queries) ----------
-  const allowlist = await getSiteAllowlist(env, siteId);
+  // ---------- 6. D1: single lookup for site existence + allowlist + domain (fix #6a: merged queries) ----------
+  const site = await getSiteAllowlist(env, siteId);
 
   // null = site does not exist
-  if (allowlist === null) {
+  if (site === null) {
     return new Response(null, { status: 404, headers: origin ? corsHeaders(origin) : {} });
   }
 
@@ -166,8 +177,8 @@ export async function handleCollect(
   // Fix #2 (HIGH): if the site has a non-empty allowlist, requests with NO Origin
   // header are also rejected — a headerless POST would bypass the allowlist entirely.
   // Only open sites (empty allowlist) accept headerless requests.
-  if (allowlist.length > 0) {
-    if (!origin || !allowlist.includes(origin)) {
+  if (site.allowlist.length > 0) {
+    if (!origin || !site.allowlist.includes(origin)) {
       return new Response(null, { status: 403, headers: origin ? corsHeaders(origin) : {} });
     }
   }
@@ -193,7 +204,15 @@ export async function handleCollect(
   const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
 
   // ---------- 10. Parse client-supplied fields ----------
-  const referrerHost = parseReferrerHost(beacon.r);
+  // Task 4: internal navigations must not credit the site as its own referrer
+  // — normalize both sides (lowercase, strip one leading "www.") and collapse
+  // a same-domain match to "" (direct), same as no `r` at all. Sites with the
+  // default empty `domain` skip this (no behavior change).
+  const rawReferrerHost = parseReferrerHost(beacon.r);
+  const referrerHost =
+    site.domain && rawReferrerHost && normalizeHost(rawReferrerHost) === normalizeHost(site.domain)
+      ? ""
+      : rawReferrerHost;
   const utm = parseUtm(beacon.p);
 
   // Prefer UA-derived device class; fall back to screen-width bucket when UA says desktop

@@ -17,6 +17,10 @@
   if (!site) return;
   var endpoint = s?.getAttribute("data-endpoint") || "/e";
   var lastPath = location.pathname;
+  // Only the first send of any kind carries document.referrer — SPA navs reuse
+  // the same unchanging referrer, so re-sending it would credit one arrival
+  // (e.g. Google) on every subsequent route/event.
+  var first = true;
 
   function send(
     type: "pv" | "event",
@@ -29,7 +33,8 @@
       p: location.pathname + location.search,
     };
     var ref = d.referrer;
-    if (ref) b.r = ref;
+    if (first && ref) b.r = ref;
+    first = false;
     var ti = d.title;
     if (ti) b.ti = ti;
     var w = screen.width;
