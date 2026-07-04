@@ -29,6 +29,24 @@ const CORS_HEADERS_BASE = {
   "Access-Control-Allow-Headers": "Content-Type",
 } as const;
 
+// ---------------------------------------------------------------------------
+// Task 7: per-isolate hot-path caches
+//
+// Every beacon paid an uncached D1 site lookup and a KV salt read, both
+// constant per isolate (site config) or per day (salt). A module-level cache
+// bounds each to one read per TTL window, per isolate. Consequence: an
+// allowlist/domain edit takes effect within <=60s on any given isolate —
+// acceptable for the collector hot path. Negative lookups (unknown site) are
+// cached too, so a flood of bogus site ids can't hammer D1.
+// ---------------------------------------------------------------------------
+
+type SiteInfo = { allowlist: string[]; domain: string };
+
+const SITE_CACHE_TTL_MS = 60_000;
+const siteCache = new Map<string, { site: SiteInfo | null; at: number }>();
+
+let saltMemo: { day: string; salt: string } | null = null;
+
 /**
  * Fetch the per-site origin allowlist + domain from D1 in one query.
  *
@@ -37,25 +55,41 @@ const CORS_HEADERS_BASE = {
  * referrer self-referral filter needs no second read. Returns null when the
  * site does not exist.
  */
-async function getSiteAllowlist(
-  env: Env,
-  siteId: string,
-): Promise<{ allowlist: string[]; domain: string } | null> {
+async function getSiteAllowlist(env: Env, siteId: string): Promise<SiteInfo | null> {
+  const cached = siteCache.get(siteId);
+  const now = Date.now();
+  if (cached && now - cached.at < SITE_CACHE_TTL_MS) {
+    return cached.site;
+  }
+
   const row = await env.DB.prepare("SELECT origin_allowlist, domain FROM sites WHERE id = ?")
     .bind(siteId)
     .first<{ origin_allowlist: string | null; domain: string | null }>();
 
   // null row → site does not exist
-  if (row === null) return null;
+  const site =
+    row === null
+      ? null
+      : {
+          allowlist: row.origin_allowlist
+            ? row.origin_allowlist
+                .split(",")
+                .map((o) => o.trim())
+                .filter(Boolean)
+            : [],
+          domain: row.domain ?? "",
+        };
 
-  const allowlist = row.origin_allowlist
-    ? row.origin_allowlist
-        .split(",")
-        .map((o) => o.trim())
-        .filter(Boolean)
-    : [];
+  siteCache.set(siteId, { site, at: now });
+  return site;
+}
 
-  return { allowlist, domain: row.domain ?? "" };
+/** Day-keyed memo over {@link getDailySalt}: one KV `get` per day, per isolate. */
+async function getCachedDailySalt(env: Env, day: string): Promise<string> {
+  if (saltMemo && saltMemo.day === day) return saltMemo.salt;
+  const salt = await getDailySalt(env.SALT, day);
+  saltMemo = { day, salt };
+  return salt;
 }
 
 /** Lowercase and strip one leading "www." for host-vs-host comparison. */
@@ -209,7 +243,7 @@ export async function handleCollect(
       request.headers.get("X-Forwarded-For") ??
       "0.0.0.0";
     const today = utcDay(new Date());
-    const salt = await getDailySalt(env.SALT, today);
+    const salt = await getCachedDailySalt(env, today);
     const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
 
     // ---------- 10. Parse client-supplied fields ----------

@@ -19,6 +19,7 @@ import {
 } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { handleCollect, handlePreflight } from "../src/collector/index";
+import worker from "../src/index";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
 import { applyMigrations } from "./apply-migrations";
 
@@ -495,9 +496,14 @@ describe("handleCollect — referrer honesty (self-referral filter)", () => {
   });
 
   it("skips the filter entirely for a site with the default empty domain", async () => {
-    // 'open-site' domain is intentionally overwritten to empty to exercise the
-    // no-domain-configured path (fix should not treat "" as matching anything).
-    await env.DB.prepare("UPDATE sites SET domain = '' WHERE id = ?").bind("open-site").run();
+    // Task 7 caches the site row per isolate — mutating 'open-site' in place
+    // would race a warm cache entry from earlier tests. Use a dedicated site
+    // with domain '' from creation so this test is independent of cache state.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("no-domain-site", "No Domain Site", "", "")
+      .run();
 
     const writes: Array<{ blobs: string[] }> = [];
     vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
@@ -505,7 +511,7 @@ describe("handleCollect — referrer honesty (self-referral filter)", () => {
     });
 
     const req = makeBeaconRequest(
-      { t: "pv", s: "open-site", p: "/", r: "https://open.com/other-page" },
+      { t: "pv", s: "no-domain-site", p: "/", r: "https://open.com/other-page" },
       { ip: "198.51.100.5" },
     );
     const ctx = createExecutionContext();
@@ -516,18 +522,23 @@ describe("handleCollect — referrer honesty (self-referral filter)", () => {
     expect(writes[0]?.blobs[2]).toBe("open.com");
 
     vi.restoreAllMocks();
-    // Restore for any other test relying on open-site's domain.
-    await env.DB.prepare("UPDATE sites SET domain = 'open.com' WHERE id = ?")
-      .bind("open-site")
-      .run();
   });
 
   it("performs exactly one D1 query for the site lookup", async () => {
+    // Fresh site id: Task 7's per-isolate cache would otherwise serve 'test-site'
+    // from cache (0 queries) by the time this test runs, hiding what this test
+    // actually checks — that a single lookup is one merged SELECT, not two.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("single-query-site", "Single Query Site", "single-query.example", "")
+      .run();
+
     const prepareSpy = vi.spyOn(env.DB, "prepare");
     prepareSpy.mockClear();
 
     const req = makeBeaconRequest(
-      { t: "pv", s: "test-site", p: "/", r: "https://example.com/other-page" },
+      { t: "pv", s: "single-query-site", p: "/", r: "https://single-query.example/other-page" },
       { origin: "https://example.com", ip: "198.51.100.6" },
     );
     const ctx = createExecutionContext();
@@ -588,5 +599,133 @@ describe("handleCollect — SiteLive DO bump", () => {
       .first<{ pageviews: number; visitors: number }>();
     expect(shadow?.pageviews).toBe(2);
     expect(shadow?.visitors).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collect — hot-path caching (Task 7)
+// ---------------------------------------------------------------------------
+describe("handleCollect — hot-path caching (Task 7)", () => {
+  it("caches the site lookup: two beacons to the same site cost one D1 query", async () => {
+    // Fresh site id — never queried by another test — so this test's cache
+    // slot starts cold regardless of file execution order.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("hotpath-site", "Hotpath Site", "hotpath.example", "")
+      .run();
+
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "hotpath-site", p: "/a" }, { ip: "203.0.113.50" }),
+      env,
+      ctx,
+    );
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "hotpath-site", p: "/b" }, { ip: "203.0.113.51" }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    // The second beacon must be served from the in-isolate site cache, not a
+    // second D1 round trip.
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it("caches unknown-site (negative) lookups too: two beacons to a bogus site cost one D1 query", async () => {
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "never-registered-site", p: "/a" }, { ip: "203.0.113.60" }),
+      env,
+      ctx,
+    );
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "never-registered-site", p: "/b" }, { ip: "203.0.113.61" }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it("caches the daily salt: two beacons on the same day cost one KV get", async () => {
+    // A synthetic day no other test touches keeps the day-keyed salt memo
+    // cold at the start of this test, regardless of file execution order.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("salt-cache-site", "Salt Cache Site", "saltcache.example", "")
+      .run();
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2031-05-17T12:00:00Z"));
+
+      const getSpy = vi.spyOn(env.SALT, "get");
+      getSpy.mockClear();
+
+      const ctx = createExecutionContext();
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/a" }, { ip: "203.0.113.70" }),
+        env,
+        ctx,
+      );
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/b" }, { ip: "203.0.113.71" }),
+        env,
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+
+      expect(getSpy).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /e — CSP work dropped on the collector route (Task 7)
+// ---------------------------------------------------------------------------
+describe("POST /e — CSP exemption (Task 7)", () => {
+  it("has no Content-Security-Policy header on the collector route", async () => {
+    const req = new Request("https://skopia.test/e", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0",
+        Origin: "https://example.com",
+      },
+      body: JSON.stringify({ t: "pv", s: "test-site", p: "/" }),
+    });
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
+  it("still sets Content-Security-Policy on GET /health", async () => {
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(new Request("https://skopia.test/health"), env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toBeTruthy();
   });
 });

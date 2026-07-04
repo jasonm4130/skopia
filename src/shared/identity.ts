@@ -6,6 +6,24 @@
  * deleted, so cross-day correlation is impossible (spec §3.5 / ADR-0002).
  */
 
+// Module-level single-entry memo: the collector calls deriveVid with the same
+// IDENTITY_HMAC_SECRET on every request within an isolate, so importing the
+// HMAC key is otherwise a wasted crypto.subtle round trip per beacon.
+let hmacKeyMemo: { secret: string; key: CryptoKey } | null = null;
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+  if (hmacKeyMemo && hmacKeyMemo.secret === secret) return hmacKeyMemo.key;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  hmacKeyMemo = { secret, key };
+  return key;
+}
+
 /**
  * Derive a 16-hex-char cookieless visitor id.
  * Deterministic for identical inputs within a day; changes when the salt rotates
@@ -25,14 +43,7 @@ export async function deriveVid(
   siteId: string,
 ): Promise<string> {
   const enc = new TextEncoder();
-  // Import the IDENTITY_HMAC_SECRET as a sign key
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
+  const key = await importHmacKey(secret);
   // The message is: salt|ip|ua|siteId (pipe-separated; raw IP consumed + discarded)
   const message = `${salt}|${ip}|${ua}|${siteId}`;
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
