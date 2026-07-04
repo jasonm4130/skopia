@@ -2,11 +2,10 @@
  * Skopia tracking script.
  *
  * Budget: <2 KB gzipped (CI-enforced). No cookies, no localStorage,
- * no sessionStorage (CI-audited). Everything beyond pathname/referrer/title/
+ * no sessionStorage (CI-audited). Everything beyond pathname/referrer/
  * screen width is enriched server-side (spec §2).
  *
- * Transport: fetch with keepalive. Fires on visibilitychange===hidden +
- * pagehide fallback (not unload/beforeunload — unreliable on mobile).
+ * Transport: fetch with keepalive: true, fired synchronously at navigation time.
  * SPA: monkey-patches history.pushState/replaceState + popstate listener.
  * Custom events: window.skopia('event', name, props) or skopia.track(name, props).
  */
@@ -35,8 +34,6 @@
     var ref = d.referrer;
     if (first && ref) b.r = ref;
     first = false;
-    var ti = d.title;
-    if (ti) b.ti = ti;
     var w = screen.width;
     if (w) b.w = w;
     if (name) {
