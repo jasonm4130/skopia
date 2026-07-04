@@ -835,6 +835,13 @@ function liveScript(siteId: string, nonce: string): string {
   function connect(){
     var proto=location.protocol==='https:'?'wss':'ws';
     var ws=new WebSocket(proto+'://'+location.host+'/live?site='+encodeURIComponent(siteId));
+    // Drive liveness refresh from the client: eviction is lazy server-side
+    // (site-live.ts currentSnapshot()), so absent new site-wide traffic a
+    // connected dashboard would otherwise show a stale count forever once a
+    // visitor leaves. A periodic ping costs no DO storage write.
+    var pingTimer=setInterval(function(){
+      if(ws.readyState===WebSocket.OPEN) ws.send('ping');
+    },15000);
     ws.onmessage=function(e){
       try{
         var d=JSON.parse(e.data);
@@ -865,7 +872,7 @@ function liveScript(siteId: string, nonce: string): string {
         }
       }catch(err){}
     };
-    ws.onclose=function(){setTimeout(connect,3000);};
+    ws.onclose=function(){clearInterval(pingTimer);setTimeout(connect,3000);};
   }
   connect();
 })();

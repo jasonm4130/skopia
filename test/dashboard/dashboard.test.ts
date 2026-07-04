@@ -699,4 +699,20 @@ describe("live top-pages panel", () => {
     );
     expect(text).not.toContain('id="live-pages-list"');
   });
+
+  it("live script pings the socket on an interval to refresh a stale live count", async () => {
+    // Eviction is lazy server-side (site-live.ts currentSnapshot()): without a
+    // client-driven ping, a dashboard left open would show a stale count
+    // forever once a visitor leaves and no further site-wide traffic arrives.
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const script = text.slice(text.indexOf("function connect()"));
+    expect(script).toContain("setInterval(function(){");
+    expect(script).toContain("ws.send('ping')");
+    // The timer must be torn down on close so a reconnect doesn't leak a
+    // second ping loop stacked on top of the old one.
+    expect(script).toContain("clearInterval(pingTimer)");
+  });
 });
