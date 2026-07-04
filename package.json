@@ -21,7 +21,7 @@
     "check:size": "node scripts/check-script-size.mjs",
     "check:cookieless": "node scripts/check-cookieless.mjs",
     "check:no-external": "node scripts/check-no-external.mjs",
-    "ci": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:schema && pnpm build:script && pnpm check:size && pnpm check:cookieless && pnpm check:no-external"
+    "ci": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:schema && pnpm build:script && git diff --exit-code -- src/shared/schema-embed.ts src/shared/skopia-embed.ts && pnpm check:size && pnpm check:cookieless && pnpm check:no-external"
   },
   "cloudflare": {
     "bindings": {
