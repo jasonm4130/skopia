@@ -1,17 +1,17 @@
 /**
  * Skopia — root Worker entry (single-Worker topology).
  *
- * One Worker hosts the collector route, the dashboard + marketing SSR, and the
- * cron `scheduled()` rollup. Bindings are shared (wrangler.jsonc). Feature agents
- * implement their own modules (collector / dashboard / marketing / rollup) and do
- * not edit this wiring beyond what their surface requires.
+ * One Worker hosts the collector route and the dashboard + marketing SSR.
+ * Bindings are shared (wrangler.jsonc). Feature agents implement their own
+ * modules (collector / dashboard / marketing) and do not edit this wiring
+ * beyond what their surface requires. Phase 2 (ADR-0011): the DO is the sole
+ * `rollup_daily` writer — the cron trigger and its export handler are retired.
  */
 
 import { Hono } from "hono";
 import { handleCollect, handlePreflight } from "./collector";
 import { dashboard } from "./dashboard";
 import { marketing } from "./marketing";
-import { handleScheduled } from "./rollup";
 import { type AppEnv, securityHeaders } from "./shared/security-headers";
 import { SKOPIA_JS } from "./shared/skopia-embed";
 import type { Env } from "./shared/types";
@@ -22,9 +22,12 @@ export { SiteLive } from "./dashboard";
 
 const app = new Hono<AppEnv>();
 
-// Per-request CSP nonce + hardening headers on EVERY response (collector,
-// dashboard, marketing). Mounted before routes so all of them inherit it.
-app.use("*", securityHeaders);
+// Per-request CSP nonce + hardening headers on every response EXCEPT the
+// collector (dashboard, marketing still get it). Mounted before routes so all
+// of them inherit it. Task 7: `/e` serves a body-less 204 to a <script>
+// beacon, never a browser-rendered document — the nonce mint + CSP/hardening
+// header pass is pure cost with no security benefit there.
+app.use("*", (c, next) => (c.req.path === "/e" ? next() : securityHeaders(c, next)));
 
 // Liveness probe (kept trivial so the walking-skeleton smoke test has a target).
 app.get("/health", (c) => c.text("ok"));
@@ -54,7 +57,4 @@ app.route("/", marketing);
 
 export default {
   fetch: app.fetch,
-  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
-    ctx.waitUntil(handleScheduled(controller, env, ctx));
-  },
 } satisfies ExportedHandler<Env>;

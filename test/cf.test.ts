@@ -174,10 +174,39 @@ describe("isBot", () => {
     expect(isBot(makeRequest(ua), ua, makeCf({ asOrganization: "Amazon.com, Inc." }))).toBe(true);
   });
 
-  it("drops verifiedBot flag", () => {
+  it("drops verifiedBotCategory when set to a non-empty string", () => {
     const ua = "Mozilla/5.0 Chrome/125.0";
-    const req = makeRequest(ua, { cf: { verifiedBot: true } });
+    const req = makeRequest(ua, { cf: { verifiedBotCategory: "Search Engine Crawler" } });
     expect(isBot(req, ua, makeCf())).toBe(true);
+  });
+
+  it("drops MegaIndexBot (bare 'bot' substring still catches real crawlers)", () => {
+    const ua = "MegaIndexBot/1.0 (+http://megaindex.com/crawler)";
+    expect(isBot(makeRequest(ua), ua, makeCf())).toBe(true);
+  });
+
+  it("passes CUBOT-brand Android phones (not a bot)", () => {
+    const ua1 =
+      "Mozilla/5.0 (Linux; Android 10; CUBOT_X30) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Mobile Safari/537.36";
+    const ua2 =
+      "Mozilla/5.0 (Linux; Android 11; CUBOT KINGKONG 5 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.101 Mobile Safari/537.36";
+    expect(isBot(makeRequest(ua1), ua1, makeCf())).toBe(false);
+    expect(isBot(makeRequest(ua2), ua2, makeCf())).toBe(false);
+  });
+
+  it("passes Private Relay / CDN egress asOrganization values (not a bot)", () => {
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36";
+    expect(isBot(makeRequest(ua), ua, makeCf({ asOrganization: "Cloudflare Inc." }))).toBe(false);
+    expect(isBot(makeRequest(ua), ua, makeCf({ asOrganization: "GOOGLE-FIBER" }))).toBe(false);
+  });
+
+  it("drops Google Cloud Platform asOrganization", () => {
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36";
+    expect(isBot(makeRequest(ua), ua, makeCf({ asOrganization: "Google Cloud Platform" }))).toBe(
+      true,
+    );
   });
 
   it("passes a real browser UA with Accept-Language", () => {

@@ -53,11 +53,6 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SiteLive"] }],
 
-  // Cron: WAE -> D1 rollup every 5 minutes (finished days + current-day partial),
-  // which also rotates the daily salt at the first pass after UTC midnight
-  // (spec §3.5 / §5.1).
-  "triggers": { "crons": ["*/5 * * * *"] },
-
   // Non-secret config. Secrets (NOT committed; set via `wrangler secret put` or
   // Deploy-button prompts) are typed in src/shared/types.ts `Env`:
   //   IDENTITY_HMAC_SECRET  — cookieless visitor hash key

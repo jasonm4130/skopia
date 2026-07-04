@@ -19,6 +19,7 @@ import {
 } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { handleCollect, handlePreflight } from "../src/collector/index";
+import worker from "../src/index";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
 import { applyMigrations } from "./apply-migrations";
 
@@ -270,6 +271,33 @@ describe("handleCollect — secret guard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Collect — infra resilience (Task 6: beacon path must never 5xx)
+// ---------------------------------------------------------------------------
+describe("handleCollect — infra resilience (never 5xx)", () => {
+  it("returns 204 with CORS headers when the D1 site lookup throws", async () => {
+    // Simulate a transient D1 outage at the site-lookup query. Pre-fix this
+    // propagates to Hono's bare 500 (no CORS headers); post-fix it must be
+    // caught and answered as a silent 204.
+    vi.spyOn(env.DB, "prepare").mockImplementation(() => {
+      throw new Error("D1 unavailable (simulated)");
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/" },
+      { origin: "https://example.com", ip: "1.2.3.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Collect — WAE writeDataPoint blob/double mapping
 // ---------------------------------------------------------------------------
 describe("handleCollect — WAE slot mapping", () => {
@@ -383,6 +411,148 @@ describe("handleCollect — WAE slot mapping", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Collect — referrer honesty (self-referral filter)
+// ---------------------------------------------------------------------------
+describe("handleCollect — referrer honesty (self-referral filter)", () => {
+  it("treats own-domain referrer as direct (empty blob)", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    // 'test-site' has domain="example.com" (seeded in beforeAll).
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://example.com/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.1" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("treats own-domain referrer with a leading www. as direct", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://www.example.com/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.2" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("treats own-domain referrer with mixed case as direct", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://EXAMPLE.COM/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.3" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("");
+
+    vi.restoreAllMocks();
+  });
+
+  it("leaves an external referrer unchanged", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", r: "https://www.google.com/search" },
+      { origin: "https://example.com", ip: "198.51.100.4" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("www.google.com");
+
+    vi.restoreAllMocks();
+  });
+
+  it("skips the filter entirely for a site with the default empty domain", async () => {
+    // Task 7 caches the site row per isolate — mutating 'open-site' in place
+    // would race a warm cache entry from earlier tests. Use a dedicated site
+    // with domain '' from creation so this test is independent of cache state.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("no-domain-site", "No Domain Site", "", "")
+      .run();
+
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "no-domain-site", p: "/", r: "https://open.com/other-page" },
+      { ip: "198.51.100.5" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes[0]?.blobs[2]).toBe("open.com");
+
+    vi.restoreAllMocks();
+  });
+
+  it("performs exactly one D1 query for the site lookup", async () => {
+    // Fresh site id: Task 7's per-isolate cache would otherwise serve 'test-site'
+    // from cache (0 queries) by the time this test runs, hiding what this test
+    // actually checks — that a single lookup is one merged SELECT, not two.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("single-query-site", "Single Query Site", "single-query.example", "")
+      .run();
+
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "single-query-site", p: "/", r: "https://single-query.example/other-page" },
+      { origin: "https://example.com", ip: "198.51.100.6" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Live count (SiteLive DO bump)
 // ---------------------------------------------------------------------------
 describe("handleCollect — SiteLive DO bump", () => {
@@ -423,11 +593,283 @@ describe("handleCollect — SiteLive DO bump", () => {
     const { runDurableObjectAlarm } = await import("cloudflare:test");
     await runDurableObjectAlarm(stub);
     const shadow = await env.DB.prepare(
-      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND dimension='total'",
+      "SELECT pageviews, visitors FROM rollup_daily WHERE site_id=? AND dimension='total'",
     )
       .bind("live-site")
       .first<{ pageviews: number; visitors: number }>();
     expect(shadow?.pageviews).toBe(2);
     expect(shadow?.visitors).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collect — hot-path caching (Task 7)
+// ---------------------------------------------------------------------------
+describe("handleCollect — hot-path caching (Task 7)", () => {
+  it("caches the site lookup: two beacons to the same site cost one D1 query", async () => {
+    // Fresh site id — never queried by another test — so this test's cache
+    // slot starts cold regardless of file execution order.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("hotpath-site", "Hotpath Site", "hotpath.example", "")
+      .run();
+
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "hotpath-site", p: "/a" }, { ip: "203.0.113.50" }),
+      env,
+      ctx,
+    );
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "hotpath-site", p: "/b" }, { ip: "203.0.113.51" }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    // The second beacon must be served from the in-isolate site cache, not a
+    // second D1 round trip.
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it("caches unknown-site (negative) lookups too: two beacons to a bogus site cost one D1 query", async () => {
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    prepareSpy.mockClear();
+
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "never-registered-site", p: "/a" }, { ip: "203.0.113.60" }),
+      env,
+      ctx,
+    );
+    await handleCollect(
+      makeBeaconRequest({ t: "pv", s: "never-registered-site", p: "/b" }, { ip: "203.0.113.61" }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it("caches the daily salt: two beacons on the same day cost one KV get", async () => {
+    // A synthetic day no other test touches keeps the day-keyed salt memo
+    // cold at the start of this test, regardless of file execution order.
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("salt-cache-site", "Salt Cache Site", "saltcache.example", "")
+      .run();
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2031-05-17T12:00:00Z"));
+
+      const getSpy = vi.spyOn(env.SALT, "get");
+      getSpy.mockClear();
+
+      const ctx = createExecutionContext();
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/a" }, { ip: "203.0.113.70" }),
+        env,
+        ctx,
+      );
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/b" }, { ip: "203.0.113.71" }),
+        env,
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+
+      expect(getSpy).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /e — CSP work dropped on the collector route (Task 7)
+// ---------------------------------------------------------------------------
+describe("POST /e — CSP exemption (Task 7)", () => {
+  it("has no Content-Security-Policy header on the collector route", async () => {
+    const req = new Request("https://skopia.test/e", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0",
+        Origin: "https://example.com",
+      },
+      body: JSON.stringify({ t: "pv", s: "test-site", p: "/" }),
+    });
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
+  it("still sets Content-Security-Policy on GET /health", async () => {
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(new Request("https://skopia.test/health"), env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collect — input validation bounds (Task 8)
+// ---------------------------------------------------------------------------
+describe("handleCollect — input validation bounds (Task 8)", () => {
+  it("omits an invalid `w` (object) instead of writing NaN into the WAE data point", async () => {
+    const writes: Array<{ doubles: number[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { doubles: number[] });
+    });
+
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: "/", w: {} },
+      { origin: "https://example.com", ip: "198.51.100.20" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.doubles.some((d) => Number.isNaN(d))).toBe(false);
+    // Double3 = screen_width — falls back to 0 rather than NaN.
+    expect(writes[0]?.doubles[2]).toBe(0);
+
+    vi.restoreAllMocks();
+  });
+
+  it("truncates an oversized custom-event name to 128 chars", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const longName = "n".repeat(2000);
+    const req = makeBeaconRequest(
+      { t: "event", s: "test-site", p: "/", n: longName },
+      { origin: "https://example.com", ip: "198.51.100.21" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    // Blob11 = event_name
+    expect(writes[0]?.blobs[10]).toBe(longName.slice(0, 128));
+    expect(writes[0]?.blobs[10]).toHaveLength(128);
+
+    vi.restoreAllMocks();
+  });
+
+  it("truncates an oversized pathname to 512 chars", async () => {
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const longPath = `/${"p".repeat(2000)}`;
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: longPath },
+      { origin: "https://example.com", ip: "198.51.100.22" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    expect(writes).toHaveLength(1);
+    // Blob2 = pathname
+    expect(writes[0]?.blobs[1]).toBe(longPath.slice(0, 512));
+    expect(writes[0]?.blobs[1]).toHaveLength(512);
+
+    vi.restoreAllMocks();
+  });
+
+  it("ignores `n` on a pageview beacon — no event dimension contribution", async () => {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("pv-fake-event-site", "PV Fake Event Site", "pvfakeevent.com", "")
+      .run();
+
+    const writes: Array<{ blobs: string[] }> = [];
+    vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+      writes.push(dp as { blobs: string[] });
+    });
+
+    const ctx = createExecutionContext();
+    const res = await handleCollect(
+      makeBeaconRequest(
+        { t: "pv", s: "pv-fake-event-site", p: "/", n: "fake-event" },
+        { ip: "198.51.100.23" },
+      ),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(204);
+    // Blob11 = event_name — must stay empty; a pv beacon cannot inject an event name.
+    expect(writes[0]?.blobs[10]).toBe("");
+
+    const { runDurableObjectAlarm } = await import("cloudflare:test");
+    const stub = env.SITE_LIVE.get(env.SITE_LIVE.idFromName("pv-fake-event-site"));
+    await runDurableObjectAlarm(stub);
+
+    const eventRow = await env.DB.prepare(
+      "SELECT dim_value FROM rollup_daily WHERE site_id=? AND dimension='event'",
+    )
+      .bind("pv-fake-event-site")
+      .first();
+    expect(eventRow).toBeNull();
+
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a body over 2048 UTF-8 bytes even when under 2048 UTF-16 code units (CJK)", async () => {
+    // Each hiragana character is 1 UTF-16 code unit but 3 UTF-8 bytes: 700
+    // of them is ~734 chars (well under a code-unit-based 2048 cap) but
+    // ~2134 bytes on the wire (over a byte-based 2048 cap).
+    const cjk = "あ".repeat(700);
+    const req = makeBeaconRequest(
+      { t: "pv", s: "test-site", p: `/${cjk}` },
+      { origin: "https://example.com", ip: "198.51.100.24" },
+    );
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+
+    expect(res.status).toBe(413);
+  });
+});
+
+// Controller adjudication of the Task-7 plan-conflict (unbounded-cache-growth):
+// site_id is the key of the per-isolate site cache; without a length bound an
+// attacker can flood distinct multi-KB ids. 64 matches validateSiteId's bound.
+describe("handleCollect — site_id length bound", () => {
+  it("rejects a site_id longer than 64 chars with 400", async () => {
+    const req = makeBeaconRequest({ t: "pv", p: "/", s: "a".repeat(65) });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(400);
   });
 });
