@@ -1,5 +1,5 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { CountEvent } from "../src/dashboard/event-dimensions";
 import { utcDay } from "../src/shared/identity";
 import { applyMigrations } from "./apply-migrations";
@@ -124,39 +124,166 @@ describe("SiteLive.flush", () => {
   });
 });
 
+// Day-scoped pending (Task 1): rows carry their own `day`, so a UTC midnight
+// crossing needs no special-case flush. Old-day and new-day deltas simply flush
+// together on the next alarm, which removes the rollover race (double-count /
+// wipe) and the rollover-discard-on-failed-flush bug by construction.
 describe("SiteLive day rollover", () => {
-  it("flushes the old day, resets seen, and clears pending on rollover", async () => {
-    const stub = stubFor("roll-1");
-    const day1 = "2026-06-28";
+  it("accumulates across midnight and flushes both days in a single alarm", async () => {
+    const stub = stubFor("roll-cross");
+    const site = "roll-cross-site";
+    const d0 = "2026-06-28";
+    const d1 = "2026-06-29";
+    vi.useFakeTimers();
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const i = instance as unknown as {
+          recordEvent(e: CountEvent): Promise<void>;
+          alarm(): Promise<void>;
+          pending: Map<string, unknown>;
+          ctx: { storage: { sql: { exec(q: string, ...b: unknown[]): { one(): { c: number } } } } };
+        };
+        vi.setSystemTime(new Date(`${d0}T12:00:00Z`));
+        await i.recordEvent(evt({ vid: "v1", path: "/a", siteId: site }));
+        await i.recordEvent(evt({ vid: "v2", path: "/a", siteId: site }));
+        vi.setSystemTime(new Date(`${d1}T00:30:00Z`));
+        await i.recordEvent(evt({ vid: "v3", path: "/a", siteId: site }));
+
+        await i.alarm(); // one alarm drains BOTH days
+
+        expect(i.pending.size).toBe(0);
+        // D0 seen rows pruned once the D1-day prune runs; D1 seen kept.
+        const d0Seen = i.ctx.storage.sql
+          .exec("SELECT COUNT(*) AS c FROM seen WHERE day = ?", d0)
+          .one().c;
+        const d1Seen = i.ctx.storage.sql
+          .exec(
+            "SELECT COUNT(*) AS c FROM seen WHERE day = ? AND dimension = ? AND dim_value = ?",
+            d1,
+            "page",
+            "/a",
+          )
+          .one().c;
+        expect(d0Seen).toBe(0);
+        expect(d1Seen).toBe(1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const r0 = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+    )
+      .bind(site, d0)
+      .first<{ pageviews: number; visitors: number }>();
+    const r1 = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+    )
+      .bind(site, d1)
+      .first<{ pageviews: number; visitors: number }>();
+    expect(r0?.pageviews).toBe(2); // D0 pageviews, flushed a day late — no loss
+    expect(r0?.visitors).toBe(2);
+    expect(r1?.pageviews).toBe(1); // D1 pageviews, same flush
+    expect(r1?.visitors).toBe(1);
+  });
+
+  it("retains data when a midnight flush fails, then flushes cleanly on retry", async () => {
+    const stub = stubFor("roll-fail");
+    const site = "roll-fail-site";
+    const d0 = "2026-06-28";
+    const d1 = "2026-06-29";
+    vi.useFakeTimers();
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const i = instance as unknown as {
+          recordEvent(e: CountEvent): Promise<void>;
+          alarm(): Promise<void>;
+          pending: Map<string, unknown>;
+        };
+        vi.setSystemTime(new Date(`${d0}T12:00:00Z`));
+        await i.recordEvent(evt({ vid: "v1", path: "/a", siteId: site }));
+
+        // Fail the FIRST flush batch (the post-midnight one); the retry succeeds.
+        const spy = vi.spyOn(env.DB, "batch").mockImplementationOnce(() => {
+          throw new Error("boom");
+        });
+        try {
+          vi.setSystemTime(new Date(`${d1}T00:30:00Z`));
+          await i.recordEvent(evt({ vid: "v2", path: "/a", siteId: site }));
+
+          await i.alarm(); // flush throws → nothing lost, nothing pruned
+          expect(i.pending.size).toBeGreaterThan(0); // both days still owed
+          await i.alarm(); // retry succeeds
+          expect(i.pending.size).toBe(0);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const r0 = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+    )
+      .bind(site, d0)
+      .first<{ pageviews: number; visitors: number }>();
+    const r1 = await env.DB.prepare(
+      "SELECT pageviews, visitors FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='page' AND dim_value='/a'",
+    )
+      .bind(site, d1)
+      .first<{ pageviews: number; visitors: number }>();
+    expect(r0?.pageviews).toBe(1); // no loss on the failed-then-retried day
+    expect(r0?.visitors).toBe(1);
+    expect(r1?.pageviews).toBe(1); // no double-count
+    expect(r1?.visitors).toBe(1);
+  });
+
+  it("migrates a legacy v1 flush blob (2-part keys + currentDay) on cold start", async () => {
+    const stub = stubFor("roll-legacy");
+    const site = "roll-legacy-site";
+    const legacyDay = "2026-06-20";
     await runInDurableObject(stub, async (instance) => {
       const i = instance as unknown as {
-        recordEvent(e: CountEvent): Promise<void>;
-        maybeRollover(newDay: string): Promise<void>;
-        pending: Map<string, unknown>;
-        currentDay: string | null;
+        rehydrate(): Promise<void>;
+        flush(): Promise<void>;
+        pending: Map<string, { day: string; dimension: string; delta: number }>;
         siteId: string | null;
-        ctx: { storage: { sql: { exec(q: string, ...b: unknown[]): { one(): { c: number } } } } };
+        ctx: { storage: { put(k: string, v: unknown): Promise<void> } };
       };
-      // Seed "yesterday" by recording then forcing currentDay back to day1.
-      await i.recordEvent(evt({ vid: "v1", path: "/old" }));
-      i.currentDay = day1;
-      i.siteId = "do-site";
+      // Seed a v1-shaped durable blob: no `v`, one currentDay, 2-part keys.
+      // Legacy pendingKey joined (dimension, dim_value) with U+0001; build it
+      // at runtime so no control byte lands in this source file.
+      const SEP = String.fromCharCode(1);
+      const legacyPending = new Map<
+        string,
+        { dimension: string; dimValue: string; delta: number }
+      >();
+      legacyPending.set(`total${SEP}`, { dimension: "total", dimValue: "", delta: 5 });
+      legacyPending.set(`page${SEP}/legacy`, { dimension: "page", dimValue: "/legacy", delta: 5 });
+      await i.ctx.storage.put("flushstate", {
+        siteId: site,
+        currentDay: legacyDay,
+        pending: legacyPending,
+      });
 
-      await i.maybeRollover("2026-06-29"); // cross midnight
+      // Cold start: RAM reset then rehydrate (the constructor's path).
+      i.pending = new Map();
+      i.siteId = null;
+      await i.rehydrate();
 
-      // old day flushed to shadow
-      // pending cleared, seen emptied
-      expect(i.pending.size).toBe(0);
-      const seenCount = i.ctx.storage.sql.exec("SELECT COUNT(*) AS c FROM seen").one().c;
-      expect(seenCount).toBe(0);
+      expect(i.siteId).toBe(site);
+      const total = [...i.pending.values()].find((p) => p.dimension === "total");
+      expect(total?.day).toBe(legacyDay); // remapped to a day-scoped row
+      await i.flush();
     });
 
     const row = await env.DB.prepare(
       "SELECT pageviews FROM rollup_daily_shadow WHERE site_id=? AND day=? AND dimension='total'",
     )
-      .bind("do-site", day1)
+      .bind(site, legacyDay)
       .first<{ pageviews: number }>();
-    expect(row?.pageviews).toBe(1); // the day1 pageview was flushed under day1
+    expect(row?.pageviews).toBe(5); // deltas landed under the legacy currentDay
   });
 });
 
@@ -203,11 +330,11 @@ describe("SiteLive /event + alarm", () => {
   });
 });
 
-// Regression for the Phase-1 parity failure (ADR-0010): `pending`, `siteId` and
-// `currentDay` were RAM-only, so a Hibernation-API sleep (~10s) between the event
-// and the 15s flush alarm discarded un-flushed pageview deltas — the alarm then
-// cold-started an empty instance and flushed nothing. The fix persists the flush
-// state durably every event and rehydrates it on construction.
+// Regression for the Phase-1 parity failure (ADR-0010): `pending` and `siteId`
+// were RAM-only, so a Hibernation-API sleep (~10s) between the event and the 15s
+// flush alarm discarded un-flushed pageview deltas — the alarm then cold-started
+// an empty instance and flushed nothing. The fix persists the flush state durably
+// every event and rehydrates it on construction.
 describe("SiteLive durability across hibernation", () => {
   it("persists flush state to durable storage on every event", async () => {
     const stub = stubFor("dur-1");
@@ -219,8 +346,8 @@ describe("SiteLive durability across hibernation", () => {
       await i.recordEvent(evt({ vid: "v1", path: "/a", siteId: "dur1-site" }));
       const state = (await i.ctx.storage.get("flushstate")) as
         | {
+            v: number;
             siteId: string;
-            currentDay: string;
             pending: Map<string, { dimension: string; delta: number }>;
           }
         | undefined;
@@ -241,14 +368,12 @@ describe("SiteLive durability across hibernation", () => {
         flush(): Promise<void>;
         pending: Map<string, unknown>;
         siteId: string | null;
-        currentDay: string | null;
       };
       await i.recordEvent(evt({ vid: "v1", path: "/p", siteId: "dur2-site" }));
       await i.recordEvent(evt({ vid: "v2", path: "/p", siteId: "dur2-site" }));
       // Simulate a Hibernation-API sleep: the runtime discards all in-memory state.
       i.pending = new Map();
       i.siteId = null;
-      i.currentDay = null;
       // Cold start: the constructor's rehydration path restores from durable storage.
       await i.rehydrate();
       expect(i.pending.size).toBeGreaterThan(0);
@@ -275,7 +400,6 @@ describe("SiteLive durability across hibernation", () => {
         flush(): Promise<void>;
         pending: Map<string, unknown>;
         siteId: string | null;
-        currentDay: string | null;
         ctx: { storage: { get(k: string): Promise<unknown> } };
       };
       await i.recordEvent(evt({ vid: "v1", path: "/p", siteId: "dur3-site" }));
@@ -284,7 +408,6 @@ describe("SiteLive durability across hibernation", () => {
       // A later cold start must find nothing to re-flush.
       i.pending = new Map();
       i.siteId = null;
-      i.currentDay = null;
       await i.rehydrate();
       await i.flush(); // no-op — the durable state was cleared
     });

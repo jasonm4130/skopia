@@ -41,9 +41,9 @@ DO UPDATE SET
   sampled   = 0
 `.trim();
 
-/** RAM pending key: dimension + \u0001 + dim_value (NEVER \x00). */
-function pendingKey(dimension: string, dimValue: string): string {
-  return `${dimension}\u0001${dimValue}`;
+/** RAM pending key: day + \u0001 + dimension + \u0001 + dim_value (NEVER \x00). */
+function pendingKey(day: string, dimension: string, dimValue: string): string {
+  return `${day}\u0001${dimension}\u0001${dimValue}`;
 }
 
 interface VisitorEntry {
@@ -51,8 +51,9 @@ interface VisitorEntry {
   path: string;
 }
 
-/** One pending bucket: a (dimension, dim_value)'s un-flushed pageview delta. */
+/** One pending bucket: a (day, dimension, dim_value)'s un-flushed pageview delta. */
 interface PendingRow {
+  day: string;
   dimension: RollupDimension;
   dimValue: string;
   delta: number;
@@ -63,11 +64,29 @@ interface PendingRow {
  * counters survive a Hibernation-API sleep / eviction / deploy that discards RAM
  * (ADR-0010). Before this, un-flushed deltas were lost when the DO slept (~10s)
  * before the 15s flush alarm, so pageviews were badly under-counted.
+ *
+ * v2 keys pending rows by day (rows carry their own `day`), so a UTC midnight
+ * crossing needs no special-case flush. {@link LegacyFlushState} is the pre-v2
+ * blob shape, migrated on rehydrate so deployed DOs don't lose in-flight deltas.
  */
 interface FlushState {
+  v: 2;
+  siteId: string | null;
+  pending: Map<string, PendingRow>;
+}
+
+/** Pre-v2 pending row: no `day` (rows shared one {@link LegacyFlushState.currentDay}). */
+interface LegacyPendingRow {
+  dimension: RollupDimension;
+  dimValue: string;
+  delta: number;
+}
+
+/** Pre-v2 durable blob: 2-part keys under one `currentDay`, no version tag. */
+interface LegacyFlushState {
   siteId: string | null;
   currentDay: string | null;
-  pending: Map<string, PendingRow>;
+  pending: Map<string, LegacyPendingRow>;
 }
 
 /** Durable storage key for the serialized FlushState (one row, rewritten/event). */
@@ -77,11 +96,11 @@ export class SiteLive extends DurableObject<Env> {
   /** vid -> { lastSeen, path } — live window (RAM, ephemeral by design). */
   private visitors = new Map<string, VisitorEntry>();
 
-  /** Per-(dimension,dim_value) pageview delta since the last flush + dirty set. */
+  /** Per-(day,dimension,dim_value) pageview delta since the last flush. */
   private pending = new Map<string, PendingRow>();
 
-  /** UTC day the RAM state belongs to (rollover detection). */
-  private currentDay: string | null = null;
+  /** Last UTC day the durable `seen` set was pruned (RAM; re-prunes on loss). */
+  private lastPruneDay: string | null = null;
 
   /** site_id, learned from the first event (needed for the D1 flush). */
   private siteId: string | null = null;
@@ -151,16 +170,14 @@ export class SiteLive extends DurableObject<Env> {
   async recordEvent(e: CountEvent): Promise<void> {
     this.siteId = e.siteId;
     const day = utcDay(new Date());
-    await this.maybeRollover(day);
-    this.currentDay = day;
 
     for (const c of eventDimensions(e)) {
-      const key = pendingKey(c.dimension, c.dimValue);
+      const key = pendingKey(day, c.dimension, c.dimValue);
       const cur = this.pending.get(key);
       if (cur) {
         cur.delta += c.pv;
       } else {
-        this.pending.set(key, { dimension: c.dimension, dimValue: c.dimValue, delta: c.pv });
+        this.pending.set(key, { day, dimension: c.dimension, dimValue: c.dimValue, delta: c.pv });
       }
       // INSERT OR IGNORE: a returning visitor is a no-op (0 rows written).
       this.ctx.storage.sql.exec(
@@ -179,31 +196,41 @@ export class SiteLive extends DurableObject<Env> {
 
   /** Reload the durable FlushState into RAM — the cold-start / construction path. */
   private async rehydrate(): Promise<void> {
-    const s = await this.ctx.storage.get<FlushState>(FLUSH_STATE_KEY);
-    if (s) {
-      this.siteId = s.siteId;
-      this.currentDay = s.currentDay;
+    const s = await this.ctx.storage.get<FlushState | LegacyFlushState>(FLUSH_STATE_KEY);
+    if (!s) return;
+    this.siteId = s.siteId;
+    if ("v" in s) {
       this.pending = s.pending;
+      return;
     }
+    // Pre-v2 blob (ADR-0010): 2-part keys under one currentDay. Remap to
+    // day-scoped keys/rows so the day-agnostic flush drains them without loss.
+    const day = s.currentDay;
+    const migrated = new Map<string, PendingRow>();
+    if (day !== null) {
+      for (const [key, row] of s.pending) {
+        migrated.set(`${day}\u0001${key}`, { day, ...row });
+      }
+    }
+    this.pending = migrated;
   }
 
   /** Persist the current flush state as a single durable row (ADR-0010). */
   private async persistPending(): Promise<void> {
     await this.ctx.storage.put<FlushState>(FLUSH_STATE_KEY, {
+      v: 2,
       siteId: this.siteId,
-      currentDay: this.currentDay,
       pending: this.pending,
     });
   }
 
   /** Flush dirty counters to D1 (spec §6). Pageviews add; visitors are exact. */
   async flush(): Promise<void> {
-    if (this.siteId === null || this.currentDay === null || this.pending.size === 0) return;
-    const day = this.currentDay;
+    if (this.siteId === null || this.pending.size === 0) return;
     const site = this.siteId;
 
     const stmts = [];
-    for (const { dimension, dimValue, delta } of this.pending.values()) {
+    for (const { day, dimension, dimValue, delta } of this.pending.values()) {
       const visitors = this.countSeen(day, dimension, dimValue);
       stmts.push(
         this.env.DB.prepare(FLUSH_UPSERT).bind(site, day, dimension, dimValue, delta, visitors),
@@ -234,16 +261,6 @@ export class SiteLive extends DurableObject<Env> {
       )
       .one();
     return Number(row.c);
-  }
-
-  /** On a UTC day change: flush the old day, reset the seen set, clear pending. */
-  private async maybeRollover(newDay: string): Promise<void> {
-    if (this.currentDay !== null && this.currentDay !== newDay) {
-      await this.flush(); // flushes under the OLD this.currentDay
-      this.ctx.storage.sql.exec("DROP TABLE IF EXISTS seen"); // not DELETE — no per-row writes
-      this.ctx.storage.sql.exec(SEEN_DDL);
-      this.pending.clear();
-    }
   }
 
   private handleLiveWs(request: Request): Response {
@@ -301,9 +318,20 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
-  /** Tick: flush counters, then evict stale live visitors (spec §6). */
+  /** Tick: flush counters, prune stale seen rows, evict stale visitors (spec §6). */
   override async alarm(): Promise<void> {
     await this.flush();
+
+    // After a clean flush (nothing still owed), lazily prune the durable `seen`
+    // set of past days — at most one DELETE per UTC day per instance. Guarded on
+    // an empty `pending` so a failed flush never drops seen rows a retry needs.
+    if (this.pending.size === 0) {
+      const today = utcDay(new Date());
+      if (today !== this.lastPruneDay) {
+        this.ctx.storage.sql.exec("DELETE FROM seen WHERE day < ?", today);
+        this.lastPruneDay = today;
+      }
+    }
 
     const cutoff = Date.now() - VISITOR_TTL_MS;
     let evicted = false;
