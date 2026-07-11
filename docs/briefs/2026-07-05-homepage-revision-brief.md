@@ -23,7 +23,7 @@ every claim; honesty is the conversion register, not a constraint on it.
 
 | Current claim | Location | Replace with |
 |---|---|---|
-| "1.9 KB" script (×4) | `Hero.astro:36`, `HowItWorks.astro:13`, `Features.astro:23`, `Faq.astro:19` | **"under 1 KB"** / exact **571 B gzipped** (we under-sell 3.4× today; re-verify against CI size report at design time) |
+| "1.9 KB" script (×4) | `Hero.astro:36`, `HowItWorks.astro:13`, `Features.astro:23`, `Faq.astro:19` | **"under 1 KB"** / exact **554 B gzipped** (we under-sell 3.4× today; re-verify against CI size report at design time) |
 | `$ npx skopia deploy` terminal + "one command" | `Hero.astro:28`, `Cta.astro:12` | The real story: **one-click Deploy to Cloudflare button** (+ "or `wrangler deploy` if you prefer the CLI"). No fictional commands. |
 | "~3M pageviews/mo free" | `HowItWorks.astro:19`, `Faq.astro:15`, `Pricing.astro:41` | Honest range: **"≈500k–1M pageviews/mo on Cloudflare's free tier"** (roadmap §O5; ceiling = DO 100k rows-written/day). Real cost math beats free-tier flexing — "100k requests free is an odd flex" was a live HN attack. |
 | "Avg. time 2m14s" fabricated stat | `ProductShot.astro:37` | Remove; replace mock with **real dashboard screenshot** (honest data). No sessionization exists — never show a time-on-site metric. |
@@ -39,7 +39,7 @@ every claim; honesty is the conversion register, not a constraint on it.
    anchor, Counterscale-style). Secondary CTA **"View live demo"** → public share
    dashboard of skopia.dev's own traffic (Track A; placeholder until shipped —
    do NOT link app.skopia.dev's login wall).
-3. **TrustStrip** — only verifiable numbers: 571 B script, $0 software cost, 90-day+
+3. **TrustStrip** — only verifiable numbers: 554 B script, $0 software cost, 90-day+
    rollups retention story, AGPL open source.
 4. **ProductShot** — real screenshot; caption it as skopia.dev's own data ("You're
    looking at this site's real traffic" once the demo ships).
@@ -67,7 +67,7 @@ every claim; honesty is the conversion register, not a constraint on it.
 - Tokens: `analytics/src/shared/tokens.css` is the source of truth, copied to
   `skopia-www/public/tokens.css` (ADR-0009) — design within the existing token palette.
 - Static Astro, no client JS beyond what exists; page must stay fast (it advertises a
-  571 B script — the marketing site being heavy is an attack surface).
+  554 B script — the marketing site being heavy is an attack surface).
 - Keep components; this is a revision, not a rebuild — Hero, TrustStrip, ProductShot,
   HowItWorks, Features, Comparison, Pricing, Faq, Cta, Footer all survive with new
   content.

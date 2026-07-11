@@ -13,7 +13,7 @@ privacy-first Google Analytics alternative with nothing to run.**
 
 - **Cookieless visitor counting, no cookie banner** — a daily-salted HMAC identity, not a
   persistent ID. [How it works →](docs/privacy.md#2-the-visitor-id-precisely)
-- **A 571 B gzipped tracking script** (≤ 2 KB budget) —
+- **A 554 B gzipped tracking script** (≤ 2 KB budget) —
   [`src/script/skopia.ts`](src/script/skopia.ts), verified by
   [`scripts/check-script-size.mjs`](scripts/check-script-size.mjs), run via `pnpm ci`.
 - **Public, read-only share links** — full dashboard views anyone can open logged-out, cached

@@ -57,7 +57,7 @@ survives a load test, and every "Live demo" link points at it.
 
 **Honesty pass on the existing homepage** (copy edits; no redesign dependency):
 
-- Script size: **571 B gzipped** everywhere "1.9 KB" appears (we under-sell by 3.4×).
+- Script size: **554 B gzipped** everywhere "1.9 KB" appears (we under-sell by 3.4×).
 - `npx skopia deploy` (hero terminal, headline, CTA, FAQ) → the one-click Deploy button
   story; "One command" framing dropped until the CLI is real.
 - Free-tier claim: replace "~3M pageviews/mo" with the honest **500k–0.9M** range and
