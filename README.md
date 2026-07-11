@@ -6,7 +6,7 @@ privacy-first Google Analytics alternative with nothing to run.**
 *Skopia* — from the Greek *skopeín*, "to observe."
 
 [![License](https://img.shields.io/github/license/jasonm4130/skopia)](LICENSE)
-[![Live demo](https://img.shields.io/badge/Live_demo-view_the_dashboard-brightgreen)](SHARE_URL_PENDING)
+[![Live demo](https://img.shields.io/badge/Live_demo-view_the_dashboard-brightgreen)](https://app.skopia.dev/share/shr_UW5RM-IF-36Nitykw3ipt40Rm17Ye0nC8v67K2JsDNs)
 
 <!-- Captured in the release checklist against a real, non-placeholder deployment. -->
 <img src="docs/assets/dashboard-overview.png" width="760" alt="Skopia's overview dashboard — pageviews, visitors, top pages, sources, and devices for a live site, rendered with real traffic, not mock data" />
