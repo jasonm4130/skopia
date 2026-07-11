@@ -24,7 +24,8 @@ privacy-first Google Analytics alternative with nothing to run.**
 - **Multi-site in one deploy** — each site gets its own live count, origin allowlist, and
   share link. [Docs →](docs/install.md#4-track-more-than-one-site)
 - **Everything lives in your Cloudflare account** — Workers, D1, KV, Durable Objects, Workers
-  Analytics Engine. Nothing calls home to the Skopia project.
+  Analytics Engine. Nothing calls home to the Skopia project, enforced by
+  [`scripts/check-no-external.mjs`](scripts/check-no-external.mjs) on every push.
 
 ## Deploy
 
