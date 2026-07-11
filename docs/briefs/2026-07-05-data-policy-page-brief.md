@@ -48,7 +48,7 @@ a design, not marketing: calm, precise, source-linked.
 4. **Where data lives** — the reader's own Cloudflare account (Workers Analytics Engine
    raw events, 90-day platform retention; D1 daily rollups thereafter). Skopia the
    project receives nothing. Retention numbers stated plainly.
-5. **The tracking script** — 571 B gzipped, no cookies, respects the visitor entirely
+5. **The tracking script** — 554 B gzipped, no cookies, respects the visitor entirely
    (nothing to opt out of because nothing identifying is kept). Link the script source.
 6. **Source links block** — identity derivation, collector, salt storage, schema
    migration files. Direct GitHub URLs at a pinned path (`src/shared/identity.ts`,

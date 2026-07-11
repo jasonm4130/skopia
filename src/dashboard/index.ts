@@ -10,7 +10,7 @@
  *   /app/sources      — auth-gated Sources breakdown
  *   /app/geography    — auth-gated Geography breakdown
  *   /app/site/:id/*   — per-site sub-routes (same views filtered to one site)
- *   /public/:token    — read-only per-site view (no auth)
+ *   /share/:token     — public read-only single-site overview (no auth; ADR-0012)
  *   /live             — WebSocket proxy → SiteLive DO
  *
  * Auth (spec §7.2): HMAC-SHA256 signed HttpOnly cookie, Web Crypto only.
@@ -39,7 +39,14 @@ import {
 import { requireSecrets, SecretsMissingError } from "../shared/config";
 import { ensureSchema } from "../shared/schema";
 import type { AppEnv } from "../shared/security-headers";
-import type { BreakdownRow, DateRange, SiteRow, StatCards, TimeSeriesPoint } from "../shared/types";
+import type {
+  BreakdownRow,
+  DateRange,
+  LiveSnapshot,
+  SiteRow,
+  StatCards,
+  TimeSeriesPoint,
+} from "../shared/types";
 
 export { SiteLive } from "./site-live";
 
@@ -1182,36 +1189,303 @@ dashboard.get("/logout", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Route: /public/:token — read-only view (no auth required)
+// Public share-link surface: /share/:token — read-only, single-site, no auth
+// (launch-readiness Task 1, ADR-0012). Excluded from the root securityHeaders
+// middleware (src/index.ts) — this surface mints its own nonce and sets its
+// own complete hardening header set via publicSecurityHeaders below, so the
+// header and the nonce baked into the body always come from the same request.
 // ---------------------------------------------------------------------------
 
-dashboard.get("/public/:token", async (c) => {
-  const nonce = c.get("nonce");
-  const token = c.req.param("token");
-  const rangeParam = c.req.query("range");
-  const range = parseRange(rangeParam);
+// Token shape pre-filter (Global Constraint 5): reject anything that isn't a
+// well-formed share token before it ever reaches D1. "shr_" + 43 URL-safe
+// chars matches the 32-byte CSPRNG token operators mint per docs/install.md.
+const SHARE_TOKEN_SHAPE = /^shr_[A-Za-z0-9_-]{43}$/;
+
+// Fully static — no nonce or token interpolation — so unknown, malformed, and
+// revoked tokens all produce byte-identical bodies (Global Constraint 5).
+const SHARE_NOT_FOUND_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not Found — Skopia</title></head>
+<body style="margin:0;height:100%;background:#0a0c11;font-family:sans-serif;">
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#6a7184;">Dashboard not found.</div>
+</body>
+</html>`;
+
+/**
+ * Complete hardening header set for /share/* responses: the same strict CSP
+ * (nonce + strict-dynamic, no unsafe-inline) and header set the root
+ * securityHeaders middleware applies to authed pages, plus X-Robots-Tag —
+ * duplicated locally rather than imported because /share/* mints its own
+ * nonce independent of the root middleware it is excluded from.
+ */
+function publicSecurityHeaders(nonce: string): Record<string, string> {
+  const csp = [
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `style-src 'self' 'nonce-${nonce}'`,
+    `style-src-attr 'unsafe-inline'`,
+    `default-src 'self'`,
+    `font-src 'self'`,
+    `img-src 'self' data:`,
+    `connect-src 'self'`,
+    `frame-ancestors 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+    `object-src 'none'`,
+  ].join("; ");
+
+  return {
+    "Content-Security-Policy": csp,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "X-Robots-Tag": "noindex, nofollow",
+  };
+}
+
+// Same views as the app sidebar minus Geography (not implemented until
+// launch-readiness Task 3) — filtered from NAV_ITEMS so the label/id source
+// never drifts from the authed sidebar.
+const PUBLIC_NAV_ITEMS = NAV_ITEMS.filter((item) => item.id !== "geography");
+
+function publicNav(activeView: string, token: string, rangeKey: string): string {
+  const navHtml = PUBLIC_NAV_ITEMS.map(({ id, label, href }) => {
+    const active = activeView === id;
+    const style = [
+      "display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:8px;",
+      "cursor:pointer;font-size:13.5px;",
+      active
+        ? "font-weight:500;color:#9fb4ff;background:rgba(77,134,255,.12);"
+        : "font-weight:400;color:#8b92a4;",
+    ].join("");
+    const dotStyle = active
+      ? "width:14px;height:14px;border-radius:3px;background:#4d86ff;"
+      : "width:14px;height:14px;border-radius:3px;border:1.5px solid #3a4150;";
+    // /app/pages → /share/:token/pages; /app (overview) → /share/:token.
+    const publicHref = href.replace(/^\/app/, `/share/${esc(token)}`);
+    const fullHref = `${publicHref}?range=${esc(rangeKey)}`;
+    return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
+  }).join("\n");
+
+  return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
+    <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
+      ${skopiaLogo()}
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
+    </div>
+    ${navHtml}
+    <a href="https://skopia.dev" style="margin-top:auto;font-size:12px;color:#6a7184;padding:10px 11px;">Powered by Skopia</a>
+  </div>`;
+}
+
+/**
+ * Layout for the public /share/:token surface. Mirrors appLayout's shape
+ * (sidebar + topbar + content) but strips everything that leaks the authed
+ * app: no site switcher, no /app or /login hrefs, no live WebSocket client.
+ * `onlineCount` renders the "online now" badge only when non-null — this
+ * task always passes null; launch-readiness Task 2 wires the real count via
+ * a server-side SITE_LIVE snapshot() read, never a public WebSocket.
+ */
+function publicLayout(
+  activeView: string,
+  token: string,
+  site: SiteRow,
+  headerRight: string,
+  content: string,
+  nonce: string,
+  rangeKey: string,
+  onlineCount: number | null,
+): string {
+  const onlineBadge =
+    onlineCount === null
+      ? ""
+      : `<div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
+      <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;"></span>
+      <span>${esc(String(onlineCount))} online now</span>
+    </div>`;
+
+  // Wires the range <select> to auto-submit its form on change — the strict
+  // CSP (no script-src-attr) blocks an inline onchange handler, same reason
+  // appLayout's navScript exists.
+  const rangeScript = `<script nonce="${nonce}">(function(){
+    var r=document.querySelector('select[name="range"]');
+    if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+  })();</script>`;
+
+  return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
+  ${publicNav(activeView, token, rangeKey)}
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">${esc(site.name)}</span>
+        <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;">
+        ${onlineBadge}
+        ${headerRight}
+      </div>
+    </div>
+    <div style="flex:1;overflow:auto;padding:28px 32px 40px;">
+      ${content}
+    </div>
+  </div>
+  ${rangeScript}
+</div>`;
+}
+
+// Read-through cache TTL for the public share surface (Global Constraint 6):
+// KV key lifetime, Cache-API freshness, and the response's s-maxage all use it.
+const SHARE_CACHE_TTL_SECONDS = 60;
+
+// A fully-rendered public page: the HTML plus the nonce baked into both its CSP
+// header and its inline scripts. Stored together so a cache replay keeps them in
+// lockstep (a page's header nonce always matches its body nonce).
+interface CachedPublicPage {
+  html: string;
+  nonce: string;
+}
+
+/** Rebuild the exact public Response from a rendered page: same headers a fresh
+ *  render would emit, so a KV-tier replay is indistinguishable from the origin. */
+function buildPublicResponse(page: CachedPublicPage): Response {
+  return new Response(page.html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": `public, s-maxage=${SHARE_CACHE_TTL_SECONDS}`,
+      ...publicSecurityHeaders(page.nonce),
+    },
+  });
+}
+
+/**
+ * Read-through cache for the public /share/* surface (ADR-0012 §4). Two tiers:
+ * the per-isolate Cache API (`caches.default`, keyed by a synthetic in-zone URL)
+ * fronts the cross-isolate `CACHE` KV namespace. A hit at either tier replays a
+ * previously rendered page verbatim — HTML and the nonce in both the CSP header
+ * and the inline scripts — so cached pages never desync header/body nonces and
+ * never re-run D1.
+ *
+ * On a full miss it reads the live-visitor count once (a single `SITE_LIVE`
+ * `snapshot()` RPC, best-effort: a DO failure degrades to no badge, never a
+ * 500), renders, then writes both tiers via `waitUntil` so the response is not
+ * held on the cache write.
+ *
+ * `cacheKey` is keyed by site id, never by token (Global Constraint 6): a
+ * rotated/revoked token can't bust another token's cache, and two tokens for one
+ * site share a single entry. `siteId` is read back from the key (segment 2 of
+ * `share:v1:{site_id}:{view}:{range}:{day}`) to address the DO.
+ */
+async function cachedPublicResponse(
+  c: Context<DashEnv>,
+  cacheKey: string,
+  ttl: number,
+  render: (onlineCount: number | null) => Promise<CachedPublicPage>,
+): Promise<Response> {
+  const cache = caches.default;
+  const cacheReq = new Request(`https://cache.local/${cacheKey}`);
+
+  const edgeHit = await cache.match(cacheReq);
+  if (edgeHit) return edgeHit;
+
+  const kvHit = await c.env.CACHE.get<CachedPublicPage>(cacheKey, {
+    type: "json",
+    cacheTtl: ttl,
+  });
+  if (kvHit) {
+    const res = buildPublicResponse(kvHit);
+    // Warm the near tier so the next request skips the KV round-trip.
+    c.executionCtx.waitUntil(cache.put(cacheReq, res.clone()));
+    return res;
+  }
+
+  // Full miss: read the live count once, best-effort. A DO failure must degrade
+  // to no badge, never a 500 — the count is a nicety, the page is the product.
+  let onlineCount: number | null = null;
+  // Segment 2 of share:v1:{site_id}:{view}:{range}:{day}.
+  // ponytail: assumes site ids carry no ':' (the WAE-index slug convention);
+  // pass the site id as its own arg if that ever stops holding.
+  const siteId = cacheKey.split(":")[2];
+  if (siteId) {
+    try {
+      const ns = c.env.SITE_LIVE;
+      const stub = ns.get(ns.idFromName(siteId)) as unknown as {
+        snapshot(): Promise<LiveSnapshot>;
+      };
+      onlineCount = (await stub.snapshot()).visitors;
+    } catch {
+      onlineCount = null;
+    }
+  }
+
+  const page = await render(onlineCount);
+  const res = buildPublicResponse(page);
+
+  c.executionCtx.waitUntil(c.env.CACHE.put(cacheKey, JSON.stringify(page), { expirationTtl: ttl }));
+  c.executionCtx.waitUntil(cache.put(cacheReq, res.clone()));
+
+  return res;
+}
+
+/**
+ * Resolve a share token to its site for a /share/:token/* route: the shape
+ * pre-filter (Global Constraint 5) runs before any D1 read, then an unknown
+ * or revoked token gets the same byte-identical 404 as a malformed one.
+ * Every /share/* route shares this exact resolution + 404 body — extracted
+ * here once Task 3 adds five more callers of it.
+ */
+async function resolveShareSite(c: Context<DashEnv>, token: string): Promise<SiteRow | Response> {
+  if (!SHARE_TOKEN_SHAPE.test(token)) {
+    return c.html(
+      SHARE_NOT_FOUND_HTML,
+      404,
+      publicSecurityHeaders(crypto.randomUUID().replace(/-/g, "")),
+    );
+  }
 
   const site = await getSiteByPublicToken(c.env.DB, token);
-  if (!site)
+  if (!site) {
     return c.html(
-      htmlDoc(
-        "Not Found",
-        "",
-        "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>",
-        nonce,
-      ),
+      SHARE_NOT_FOUND_HTML,
       404,
+      publicSecurityHeaders(crypto.randomUUID().replace(/-/g, "")),
     );
+  }
 
-  const [cards, series, topPages, topSources, topCountries] = await Promise.all([
-    getStatCards(c.env.DB, site.id, range),
-    getTimeSeries(c.env.DB, site.id, range),
-    getTopPages(c.env.DB, site.id, range, 5),
-    getTopSources(c.env.DB, site.id, range, 5),
-    getTopCountries(c.env.DB, site.id, range, 5),
-  ]);
+  return site;
+}
 
-  const content = `
+// `/share/` with no token (trailing slash, empty segment) never matches
+// `/share/:token` and would otherwise fall through to Hono's default 404
+// with none of the /share/* hardening headers (src/index.ts excludes this
+// whole prefix from the root securityHeaders middleware). Serve the same
+// not-found response the malformed/unknown-token paths use so every
+// /share/* response sets the complete header set.
+dashboard.get("/share/", (c) =>
+  c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(crypto.randomUUID().replace(/-/g, ""))),
+);
+
+// Overview
+dashboard.get("/share/:token", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:overview:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+
+    const [cards, series, topPages, topSources, topCountries] = await Promise.all([
+      getStatCards(c.env.DB, site.id, range),
+      getTimeSeries(c.env.DB, site.id, range),
+      getTopPages(c.env.DB, site.id, range, 5),
+      getTopSources(c.env.DB, site.id, range, 5),
+      getTopCountries(c.env.DB, site.id, range, 5),
+    ]);
+
+    const content = `
     ${statCardsHtml(cards, cards.sampled)}
     ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
     <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
@@ -1221,19 +1495,203 @@ dashboard.get("/public/:token", async (c) => {
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
   `;
 
-  const body = `<div style="max-width:1280px;margin:0 auto;padding:32px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
-      <div style="display:flex;align-items:center;gap:9px;">
-        ${skopiaLogo()}
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;color:#fff;">${esc(site.name)}</span>
-        <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
-      </div>
-      ${rangePicker(range.key, "")}
-    </div>
-    ${content}
-  </div>`;
+    const headerRight = rangePicker(range.key, "");
 
-  return c.html(htmlDoc(site.name, "", body, nonce));
+    const html = htmlDoc(
+      site.name,
+      "",
+      publicLayout("overview", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Pages
+dashboard.get("/share/:token/pages", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:pages:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopPages(c.env.DB, site.id, range, 50);
+
+    const content = breakdownTable(
+      [
+        { label: "Page", key: "label", mono: true },
+        { label: "Visitors", key: "visitors" },
+        { label: "Pageviews", key: "pageviews" },
+      ],
+      rows,
+    );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Pages — ${site.name}`,
+      "",
+      publicLayout("pages", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Sources
+dashboard.get("/share/:token/sources", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:sources:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopSources(c.env.DB, site.id, range, 50);
+
+    const content = breakdownTable(
+      [
+        { label: "Source", key: "label" },
+        { label: "Visitors", key: "visitors" },
+        { label: "Share", key: "share" },
+      ],
+      rows,
+    );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Sources — ${site.name}`,
+      "",
+      publicLayout("sources", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Devices
+dashboard.get("/share/:token/devices", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:devices:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const [devices, browsers, oses] = await Promise.all([
+      getTopDevices(c.env.DB, site.id, range, 10),
+      getTopBrowsers(c.env.DB, site.id, range, 10),
+      getTopOperatingSystems(c.env.DB, site.id, range, 10),
+    ]);
+
+    const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("Device type", devices, "#4d86ff")}
+      ${breakdownCard("Browser", browsers, "#7a5cff")}
+      ${breakdownCard("Operating system", oses, "#2bd888")}
+    </div>`;
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Devices — ${site.name}`,
+      "",
+      publicLayout("devices", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Campaigns (UTM)
+dashboard.get("/share/:token/campaigns", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:campaigns:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const [utmSources, utmMediums, utmCampaigns] = await Promise.all([
+      getTopUtmSources(c.env.DB, site.id, range, 10),
+      getTopUtmMediums(c.env.DB, site.id, range, 10),
+      getTopUtmCampaigns(c.env.DB, site.id, range, 10),
+    ]);
+
+    const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("UTM source", utmSources, "#4d86ff")}
+      ${breakdownCard("UTM medium", utmMediums, "#7a5cff")}
+      ${breakdownCard("UTM campaign", utmCampaigns, "#2bd888")}
+    </div>`;
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Campaigns — ${site.name}`,
+      "",
+      publicLayout("campaigns", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Custom events
+dashboard.get("/share/:token/events", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:events:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopEvents(c.env.DB, site.id, range, 50);
+
+    // dimension='event' counts one "pageview" per fire (event-dimensions.ts),
+    // so the column is labeled Count — Pageviews would be a lie here. Mirrors
+    // /app/events' empty state verbatim (same content builder).
+    const content =
+      rows.length === 0
+        ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
+      <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
+      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+    </div>`
+        : breakdownTable(
+            [
+              { label: "Event", key: "label", mono: true },
+              { label: "Count", key: "pageviews" },
+              { label: "Visitors", key: "visitors" },
+            ],
+            rows,
+          );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Events — ${site.name}`,
+      "",
+      publicLayout("events", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
 });
 
 // ---------------------------------------------------------------------------
