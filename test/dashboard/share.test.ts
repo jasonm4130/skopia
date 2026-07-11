@@ -193,6 +193,16 @@ describe("GET /share/:token", () => {
     );
   });
 
+  it("empty token (trailing slash, no segment) 404s with the full /share/* hardening header set", async () => {
+    const { res, text } = await fetch_(req("/share/"));
+    expect(res.status).toBe(404);
+    expect(text).toContain("Dashboard not found.");
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(res.headers.get("content-security-policy") ?? "").toMatch(/nonce-/);
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(queries.getSiteByPublicToken).not.toHaveBeenCalled();
+  });
+
   it("revoked token (previously valid, now resolves null) 404s the same way as unknown", async () => {
     vi.mocked(queries.getSiteByPublicToken).mockResolvedValueOnce(null);
     const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}`));

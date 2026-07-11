@@ -1455,6 +1455,16 @@ async function resolveShareSite(c: Context<DashEnv>, token: string): Promise<Sit
   return site;
 }
 
+// `/share/` with no token (trailing slash, empty segment) never matches
+// `/share/:token` and would otherwise fall through to Hono's default 404
+// with none of the /share/* hardening headers (src/index.ts excludes this
+// whole prefix from the root securityHeaders middleware). Serve the same
+// not-found response the malformed/unknown-token paths use so every
+// /share/* response sets the complete header set.
+dashboard.get("/share/", (c) =>
+  c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(crypto.randomUUID().replace(/-/g, ""))),
+);
+
 // Overview
 dashboard.get("/share/:token", async (c) => {
   const token = c.req.param("token");

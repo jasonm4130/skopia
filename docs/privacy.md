@@ -75,7 +75,7 @@ visitor_id = first 8 bytes of
 Read the function: [`src/shared/identity.ts`](../src/shared/identity.ts).
 
 - `IDENTITY_HMAC_SECRET` is a secret you generate at deploy time (see the
-  [README's secret-generation walkthrough](../README.md#generating-your-secrets));
+  [install guide's secret-generation walkthrough](install.md#generating-your-secrets));
   it never leaves your account and is not part of this repo.
 - The raw client IP and `User-Agent` are read from the request, folded into the
   hash **in memory**, and then discarded — see the identity step in
