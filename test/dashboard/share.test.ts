@@ -29,6 +29,24 @@ const MOCK_SITE: SiteRow = {
   created_at: 1700000000,
 };
 
+// Mock-data markers reused from test/dashboard/dashboard.test.ts's /app view
+// tests (Task 3 brief: "reuse the mock-data markers the app-view tests
+// assert").
+const MOCK_DEVICES: BreakdownRow[] = [
+  { label: "desktop", pageviews: 3000, visitors: 800, share: 0.7, sampled: false },
+  { label: "mobile", pageviews: 1200, visitors: 350, share: 0.3, sampled: false },
+];
+
+const MOCK_UTM: BreakdownRow[] = [
+  { label: "newsletter", pageviews: 400, visitors: 300, share: 0.6, sampled: false },
+  { label: "twitter", pageviews: 250, visitors: 200, share: 0.4, sampled: false },
+];
+
+const MOCK_EVENTS: BreakdownRow[] = [
+  { label: "signup", pageviews: 42, visitors: 30, share: 0.02, sampled: false },
+  { label: "download", pageviews: 17, visitors: 15, share: 0.01, sampled: false },
+];
+
 const MOCK_CARDS: StatCards = {
   pageviews: 5000,
   visitors: 1200,
@@ -109,6 +127,13 @@ beforeEach(() => {
   vi.mocked(queries.getTopPages).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopSources).mockResolvedValue(MOCK_BREAKDOWN);
   vi.mocked(queries.getTopCountries).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopDevices).mockResolvedValue(MOCK_DEVICES);
+  vi.mocked(queries.getTopBrowsers).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopOperatingSystems).mockResolvedValue(MOCK_BREAKDOWN);
+  vi.mocked(queries.getTopUtmSources).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmMediums).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopUtmCampaigns).mockResolvedValue(MOCK_UTM);
+  vi.mocked(queries.getTopEvents).mockResolvedValue(MOCK_EVENTS);
 });
 
 // ---------------------------------------------------------------------------
@@ -196,6 +221,102 @@ describe("GET /share/:token", () => {
     const { text } = await fetch_(req(`/share/${VALID_TOKEN}`));
     expect(text).not.toContain("new WebSocket(");
     expect(text).not.toContain("/live?site=");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 — the five remaining share views: pages, sources, devices,
+// campaigns, events. Each runs the same query set and content builders as
+// its /app counterpart, rendered inside publicLayout. Geography stays
+// unimplemented on the public surface (not part of this task) and 404s like
+// any other unmatched /share/* subpath.
+// ---------------------------------------------------------------------------
+
+function nonceOf(res: Response): string | undefined {
+  const csp = res.headers.get("content-security-policy") ?? "";
+  return csp.match(/'nonce-([a-f0-9]+)'/)?.[1];
+}
+
+function bodyNonceOf(text: string): string | undefined {
+  return text.match(/nonce="([a-f0-9]+)"/)?.[1];
+}
+
+describe("GET /share/:token/{pages,sources,devices,campaigns,events}", () => {
+  it("pages: 200 with the Pages breakdown table, matching nonce, and /share/:token nav (never /app)", async () => {
+    const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/pages`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("/home"); // MOCK_BREAKDOWN row
+    expect(text).toContain(">Page<"); // Pages-view column header (breakdownTable)
+    expect(nonceOf(res)).toBeTruthy();
+    expect(nonceOf(res)).toBe(bodyNonceOf(text));
+    expect(text).not.toContain('href="/app');
+    expect(text).toContain(`/share/${VALID_TOKEN}/sources`);
+  });
+
+  it("sources: 200 with the Sources breakdown table and matching nonce", async () => {
+    const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/sources`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("/home");
+    expect(text).toContain(">Source<"); // Sources-view column header
+    expect(nonceOf(res)).toBeTruthy();
+    expect(nonceOf(res)).toBe(bodyNonceOf(text));
+  });
+
+  it("devices: 200 with device/browser/OS panels and matching nonce", async () => {
+    const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/devices`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("Device type");
+    expect(text).toContain("Browser");
+    expect(text).toContain("Operating system");
+    expect(text).toContain("desktop"); // MOCK_DEVICES row
+    expect(nonceOf(res)).toBeTruthy();
+    expect(nonceOf(res)).toBe(bodyNonceOf(text));
+  });
+
+  it("campaigns: 200 with UTM source/medium/campaign panels and matching nonce", async () => {
+    const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/campaigns`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("UTM source");
+    expect(text).toContain("UTM medium");
+    expect(text).toContain("UTM campaign");
+    expect(text).toContain("newsletter"); // MOCK_UTM row
+    expect(nonceOf(res)).toBeTruthy();
+    expect(nonceOf(res)).toBe(bodyNonceOf(text));
+  });
+
+  it("events: 200 with the events table and matching nonce", async () => {
+    const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/events`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("signup");
+    expect(text).toContain("download");
+    expect(nonceOf(res)).toBeTruthy();
+    expect(nonceOf(res)).toBe(bodyNonceOf(text));
+  });
+
+  it("every rendered view's nav hrefs point at /share/:token/… — never /app", async () => {
+    for (const path of ["", "/pages", "/sources", "/devices", "/campaigns", "/events"]) {
+      const { text } = await fetch_(req(`/share/${VALID_TOKEN}${path}`));
+      expect(text).not.toContain('href="/app');
+      expect(text).toContain(`/share/${VALID_TOKEN}/pages`);
+      expect(text).toContain(`/share/${VALID_TOKEN}/sources`);
+      expect(text).toContain(`/share/${VALID_TOKEN}/devices`);
+      expect(text).toContain(`/share/${VALID_TOKEN}/campaigns`);
+      expect(text).toContain(`/share/${VALID_TOKEN}/events`);
+    }
+  });
+
+  it("geography 404s — not part of the public surface", async () => {
+    const { res } = await fetch_(req(`/share/${VALID_TOKEN}/geography`));
+    expect(res.status).toBe(404);
+  });
+
+  it("an unknown token 404s each view the same way as the overview route", async () => {
+    const unknownToken = `shr_${"z".repeat(43)}`;
+    for (const path of ["/pages", "/sources", "/devices", "/campaigns", "/events"]) {
+      const { res, text } = await fetch_(req(`/share/${unknownToken}${path}`));
+      expect(res.status).toBe(404);
+      expect(text).toContain("Dashboard not found.");
+    }
   });
 });
 
