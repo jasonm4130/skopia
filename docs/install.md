@@ -97,7 +97,8 @@ openssl rand -hex 32
 
 ### Local development
 
-Copy `.dev.vars.example` to `.dev.vars` and fill in the four secret values, then:
+This project uses [pnpm](https://pnpm.io). Copy `.dev.vars.example` to `.dev.vars` and
+fill in the four secret values, then:
 
 ```sh
 pnpm install
@@ -112,8 +113,10 @@ pnpm dev
   Engine queries behind every chart.
 - **Ingest works** once `IDENTITY_HMAC_SECRET` is set — without it the collector returns
   `503` rather than signing with an undefined key.
-- On first dashboard load, a setup screen prompts you to create your owner password. This
-  is the only manual step after the Deploy wizard.
+- On first dashboard load, a setup screen at `/setup` prompts you to create your owner
+  password. This is the only manual step after the Deploy wizard.
+- **Drop the tracking snippet on your site** (next section). First pageview appears
+  within minutes.
 
 ## Add Skopia to your site
 
