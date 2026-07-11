@@ -16,7 +16,7 @@
  */
 
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BreakdownRow, SiteRow, StatCards, TimeSeriesPoint } from "../../src/shared/types";
 
@@ -196,6 +196,118 @@ describe("GET /share/:token", () => {
     const { text } = await fetch_(req(`/share/${VALID_TOKEN}`));
     expect(text).not.toContain("new WebSocket(");
     expect(text).not.toContain("/live?site=");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2 — read-through cache + server-rendered "online now" count
+//
+// The share overview is fronted by a two-tier read-through cache (Cache API
+// over the CACHE KV namespace), keyed by site id (Global Constraint 6). A cache
+// hit replays the exact stored Response — body AND the nonce baked into both the
+// CSP header and the inline scripts — so the second GET of a URL carries the
+// same nonce the first minted. The "online now" count is read once, server-side,
+// via a single SITE_LIVE snapshot() RPC (never a public WebSocket); a snapshot
+// failure degrades to no badge, never a 500.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal SITE_LIVE namespace stub: routes `.get(idFromName(id)).snapshot()` to
+ * the supplied resolver so a test controls the live count (or forces a throw)
+ * without standing up a real DO. Assign onto `env.SITE_LIVE`; the afterEach
+ * restores the real binding.
+ */
+function stubSiteLive(snapshot: () => Promise<{ visitors: number; topPages: never[] }>) {
+  return {
+    idFromName: (name: string) => name,
+    get: () => ({ snapshot }),
+  };
+}
+
+describe("GET /share/:token — read-through cache + online-now (Task 2)", () => {
+  let realSiteLive: typeof env.SITE_LIVE;
+
+  beforeEach(() => {
+    realSiteLive = env.SITE_LIVE;
+  });
+  afterEach(() => {
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = realSiteLive;
+  });
+
+  // Give a share request a site with a test-unique id (Global Constraint 7 —
+  // the Workers pool shares KV/cache state within a file run, and the cache key
+  // is keyed by site id, so unique ids keep each test's cache entry its own).
+  function useSite(id: string, token: string): void {
+    const site: SiteRow = { ...MOCK_SITE, id, name: `${id}.dev`, public_token: token };
+    vi.mocked(queries.getSiteByPublicToken).mockImplementation(async (_db, t) =>
+      t === token ? site : null,
+    );
+  }
+
+  it("serves the second GET from cache: header and body carry the SAME nonce", async () => {
+    const token = `shr_${"c".repeat(43)}`;
+    useSite("site-cache-hit", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => ({
+      visitors: 0,
+      topPages: [],
+    }));
+
+    const first = await fetch_(req(`/share/${token}`));
+    const second = await fetch_(req(`/share/${token}`));
+
+    expect(first.res.status).toBe(200);
+    expect(second.res.status).toBe(200);
+
+    const nonceOf = (csp: string | null) => (csp ?? "").match(/'nonce-([a-f0-9]+)'/)?.[1];
+    const n1 = nonceOf(first.res.headers.get("content-security-policy"));
+    const n2 = nonceOf(second.res.headers.get("content-security-policy"));
+    const bodyNonce2 = second.text.match(/nonce="([a-f0-9]+)"/)?.[1];
+
+    expect(n1).toBeTruthy();
+    // Fresh renders mint a fresh nonce each time; a stable nonce across two
+    // requests proves the second was served from cache, not re-rendered.
+    expect(n2).toBe(n1);
+    expect(bodyNonce2).toBe(n1);
+    // The whole cached body is replayed byte-for-byte.
+    expect(second.text).toBe(first.text);
+  });
+
+  it("200 responses carry Cache-Control: public, s-maxage=60", async () => {
+    const token = `shr_${"d".repeat(43)}`;
+    useSite("site-cache-cc", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => ({
+      visitors: 0,
+      topPages: [],
+    }));
+
+    const { res } = await fetch_(req(`/share/${token}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("public, s-maxage=60");
+  });
+
+  it("renders the online-now badge from the SITE_LIVE snapshot count", async () => {
+    const token = `shr_${"e".repeat(43)}`;
+    useSite("site-live-count", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => ({
+      visitors: 7,
+      topPages: [],
+    }));
+
+    const { res, text } = await fetch_(req(`/share/${token}`));
+    expect(res.status).toBe(200);
+    expect(text).toContain("7 online now");
+  });
+
+  it("degrades to 200 with no online-now badge when the snapshot RPC throws", async () => {
+    const token = `shr_${"f".repeat(43)}`;
+    useSite("site-live-throws", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => {
+      throw new Error("DO unreachable");
+    });
+
+    const { res, text } = await fetch_(req(`/share/${token}`));
+    expect(res.status).toBe(200);
+    expect(text).not.toContain("online now");
   });
 });
 
