@@ -39,7 +39,14 @@ import {
 import { requireSecrets, SecretsMissingError } from "../shared/config";
 import { ensureSchema } from "../shared/schema";
 import type { AppEnv } from "../shared/security-headers";
-import type { BreakdownRow, DateRange, SiteRow, StatCards, TimeSeriesPoint } from "../shared/types";
+import type {
+  BreakdownRow,
+  DateRange,
+  LiveSnapshot,
+  SiteRow,
+  StatCards,
+  TimeSeriesPoint,
+} from "../shared/types";
 
 export { SiteLive } from "./site-live";
 
@@ -1326,32 +1333,136 @@ function publicLayout(
 </div>`;
 }
 
+// Read-through cache TTL for the public share surface (Global Constraint 6):
+// KV key lifetime, Cache-API freshness, and the response's s-maxage all use it.
+const SHARE_CACHE_TTL_SECONDS = 60;
+
+// A fully-rendered public page: the HTML plus the nonce baked into both its CSP
+// header and its inline scripts. Stored together so a cache replay keeps them in
+// lockstep (a page's header nonce always matches its body nonce).
+interface CachedPublicPage {
+  html: string;
+  nonce: string;
+}
+
+/** Rebuild the exact public Response from a rendered page: same headers a fresh
+ *  render would emit, so a KV-tier replay is indistinguishable from the origin. */
+function buildPublicResponse(page: CachedPublicPage): Response {
+  return new Response(page.html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": `public, s-maxage=${SHARE_CACHE_TTL_SECONDS}`,
+      ...publicSecurityHeaders(page.nonce),
+    },
+  });
+}
+
+/**
+ * Read-through cache for the public /share/* surface (ADR-0012 §4). Two tiers:
+ * the per-isolate Cache API (`caches.default`, keyed by a synthetic in-zone URL)
+ * fronts the cross-isolate `CACHE` KV namespace. A hit at either tier replays a
+ * previously rendered page verbatim — HTML and the nonce in both the CSP header
+ * and the inline scripts — so cached pages never desync header/body nonces and
+ * never re-run D1.
+ *
+ * On a full miss it reads the live-visitor count once (a single `SITE_LIVE`
+ * `snapshot()` RPC, best-effort: a DO failure degrades to no badge, never a
+ * 500), renders, then writes both tiers via `waitUntil` so the response is not
+ * held on the cache write.
+ *
+ * `cacheKey` is keyed by site id, never by token (Global Constraint 6): a
+ * rotated/revoked token can't bust another token's cache, and two tokens for one
+ * site share a single entry. `siteId` is read back from the key (segment 2 of
+ * `share:v1:{site_id}:{view}:{range}:{day}`) to address the DO.
+ */
+async function cachedPublicResponse(
+  c: Context<DashEnv>,
+  cacheKey: string,
+  ttl: number,
+  render: (onlineCount: number | null) => Promise<CachedPublicPage>,
+): Promise<Response> {
+  const cache = caches.default;
+  const cacheReq = new Request(`https://cache.local/${cacheKey}`);
+
+  const edgeHit = await cache.match(cacheReq);
+  if (edgeHit) return edgeHit;
+
+  const kvHit = await c.env.CACHE.get<CachedPublicPage>(cacheKey, {
+    type: "json",
+    cacheTtl: ttl,
+  });
+  if (kvHit) {
+    const res = buildPublicResponse(kvHit);
+    // Warm the near tier so the next request skips the KV round-trip.
+    c.executionCtx.waitUntil(cache.put(cacheReq, res.clone()));
+    return res;
+  }
+
+  // Full miss: read the live count once, best-effort. A DO failure must degrade
+  // to no badge, never a 500 — the count is a nicety, the page is the product.
+  let onlineCount: number | null = null;
+  // Segment 2 of share:v1:{site_id}:{view}:{range}:{day}.
+  // ponytail: assumes site ids carry no ':' (the WAE-index slug convention);
+  // pass the site id as its own arg if that ever stops holding.
+  const siteId = cacheKey.split(":")[2];
+  if (siteId) {
+    try {
+      const ns = c.env.SITE_LIVE;
+      const stub = ns.get(ns.idFromName(siteId)) as unknown as {
+        snapshot(): Promise<LiveSnapshot>;
+      };
+      onlineCount = (await stub.snapshot()).visitors;
+    } catch {
+      onlineCount = null;
+    }
+  }
+
+  const page = await render(onlineCount);
+  const res = buildPublicResponse(page);
+
+  c.executionCtx.waitUntil(c.env.CACHE.put(cacheKey, JSON.stringify(page), { expirationTtl: ttl }));
+  c.executionCtx.waitUntil(cache.put(cacheReq, res.clone()));
+
+  return res;
+}
+
 // Overview
 dashboard.get("/share/:token", async (c) => {
-  const nonce = crypto.randomUUID().replace(/-/g, "");
   const token = c.req.param("token");
 
   if (!SHARE_TOKEN_SHAPE.test(token)) {
-    return c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(nonce));
+    return c.html(
+      SHARE_NOT_FOUND_HTML,
+      404,
+      publicSecurityHeaders(crypto.randomUUID().replace(/-/g, "")),
+    );
   }
 
   const site = await getSiteByPublicToken(c.env.DB, token);
   if (!site) {
-    return c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(nonce));
+    return c.html(
+      SHARE_NOT_FOUND_HTML,
+      404,
+      publicSecurityHeaders(crypto.randomUUID().replace(/-/g, "")),
+    );
   }
 
-  const rangeParam = c.req.query("range");
-  const range = parseRange(rangeParam);
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:overview:${range.key}:${todayUtc()}`;
 
-  const [cards, series, topPages, topSources, topCountries] = await Promise.all([
-    getStatCards(c.env.DB, site.id, range),
-    getTimeSeries(c.env.DB, site.id, range),
-    getTopPages(c.env.DB, site.id, range, 5),
-    getTopSources(c.env.DB, site.id, range, 5),
-    getTopCountries(c.env.DB, site.id, range, 5),
-  ]);
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
 
-  const content = `
+    const [cards, series, topPages, topSources, topCountries] = await Promise.all([
+      getStatCards(c.env.DB, site.id, range),
+      getTimeSeries(c.env.DB, site.id, range),
+      getTopPages(c.env.DB, site.id, range, 5),
+      getTopSources(c.env.DB, site.id, range, 5),
+      getTopCountries(c.env.DB, site.id, range, 5),
+    ]);
+
+    const content = `
     ${statCardsHtml(cards, cards.sampled)}
     ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
     <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
@@ -1361,18 +1472,17 @@ dashboard.get("/share/:token", async (c) => {
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
   `;
 
-  const headerRight = rangePicker(range.key, "");
+    const headerRight = rangePicker(range.key, "");
 
-  return c.html(
-    htmlDoc(
+    const html = htmlDoc(
       site.name,
       "",
-      publicLayout("overview", token, site, headerRight, content, nonce, range.key, null),
+      publicLayout("overview", token, site, headerRight, content, nonce, range.key, onlineCount),
       nonce,
-    ),
-    200,
-    publicSecurityHeaders(nonce),
-  );
+    );
+
+    return { html, nonce };
+  });
 });
 
 // ---------------------------------------------------------------------------
