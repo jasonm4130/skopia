@@ -23,11 +23,18 @@ export { SiteLive } from "./dashboard";
 const app = new Hono<AppEnv>();
 
 // Per-request CSP nonce + hardening headers on every response EXCEPT the
-// collector (dashboard, marketing still get it). Mounted before routes so all
-// of them inherit it. Task 7: `/e` serves a body-less 204 to a <script>
-// beacon, never a browser-rendered document — the nonce mint + CSP/hardening
-// header pass is pure cost with no security benefit there.
-app.use("*", (c, next) => (c.req.path === "/e" ? next() : securityHeaders(c, next)));
+// collector and the public share surface (dashboard, marketing still get
+// it). Mounted before routes so all of them inherit it. Task 7: `/e` serves a
+// body-less 204 to a <script> beacon, never a browser-rendered document — the
+// nonce mint + CSP/hardening header pass is pure cost with no security
+// benefit there. `/share/*` (launch-readiness Task 1, ADR-0012) mints its own
+// nonce and sets its own complete hardening header set via
+// publicSecurityHeaders(nonce) in src/dashboard/index.ts — this middleware
+// would only mint a nonce nothing reads and never gets applied to the
+// response.
+app.use("*", (c, next) =>
+  c.req.path === "/e" || c.req.path.startsWith("/share/") ? next() : securityHeaders(c, next),
+);
 
 // Liveness probe (kept trivial so the walking-skeleton smoke test has a target).
 app.get("/health", (c) => c.text("ok"));

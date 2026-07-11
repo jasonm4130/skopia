@@ -9,11 +9,12 @@
  *   - /app/pages redirects to /login when unauthenticated
  *   - /app/sources redirects to /login when unauthenticated
  *   - /app/geography redirects to /login when unauthenticated
- *   - /public/:token returns 404 for unknown token
- *   - /public/:token returns 200 with HTML overview sections for a known token
  *   - /logout clears the session cookie
  *   - /live unauthenticated is rejected (redirected to /login)
  *   - /live authenticated but missing Upgrade returns 426
+ *
+ * The public /share/:token surface (launch-readiness Task 1, replacing
+ * /public/:token) has its own suite: test/dashboard/share.test.ts.
  *
  * src/db/queries.ts is mocked so these tests do not depend on the backbone
  * agent's implementation.
@@ -399,77 +400,30 @@ describe("auth gating", () => {
 });
 
 // ---------------------------------------------------------------------------
-// /public/:token
-// ---------------------------------------------------------------------------
-
-describe("/public/:token", () => {
-  it("returns 404 for an unknown token", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(null);
-    const { res } = await fetch_(req("/public/nonexistent-token"));
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 200 with HTML for a valid token", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { res, text } = await fetch_(req("/public/pub-tok-abc123"));
-    expect(res.status).toBe(200);
-    const ct = res.headers.get("content-type") ?? "";
-    expect(ct).toMatch(/text\/html/);
-    expect(text).toContain("test.dev");
-  });
-
-  it("public view shows stat-card values from mock data", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
-    // fmtNum(1200) = "1.2K"
-    expect(text).toContain("1.2K");
-    // fmtNum(5000) = "5K"
-    expect(text).toContain("5K");
-  });
-
-  it("public view contains 'read-only' badge", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
-    expect(text).toContain("read-only");
-  });
-
-  it("public view contains top pages breakdown", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
-    expect(text).toContain("/home");
-    expect(text).toContain("Top pages");
-    expect(text).toContain("Top sources");
-  });
-
-  it("public view does NOT contain sidebar nav (no auth shell)", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
-    // The sidebar "Overview" nav link is only in the auth'd shell
-    expect(text).not.toContain('href="/app"');
-  });
-
-  it("range picker is present on public view", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
-    expect(text).toContain("Last 30 days");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Stat-card labels (Task 5 — honest "bounce rate" relabel)
+//
+// Migrated off /public/:token (launch-readiness Task 1: /share/:token
+// replaces it — public-surface coverage lives in test/dashboard/share.test.ts
+// now). statCardsHtml() is shared verbatim between /app and /share, so
+// asserting its output via the still-authed /app route preserves the same
+// coverage without coupling this suite to the public surface.
 // ---------------------------------------------------------------------------
 
 describe("stat-card labels", () => {
   it("renders the 'Single-Page Visits' label, not 'Bounce Rate'", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
     expect(text).toContain("Single-Page Visits");
     expect(text).not.toContain("Bounce Rate");
   });
 
   it("footnotes the imprecise metrics with an honest caveat tooltip", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
     // Visitors is a sum of daily uniques across the range — the caveat must say so.
     expect(text).toContain("counted once per day");
     // Single-Page Visits is estimated, not measured per-session.
@@ -601,20 +555,27 @@ describe("no-sites empty state", () => {
 
 // ---------------------------------------------------------------------------
 // Sampled badge
+//
+// Migrated off /public/:token (see "stat-card labels" above for why /app is
+// the right stand-in now that /share/:token owns the public surface).
 // ---------------------------------------------------------------------------
 
 describe("sampled data badge", () => {
   it("shows ~est badge when cards.sampled is true", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: true });
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
     expect(text).toContain("~est");
   });
 
   it("does NOT show ~est badge when cards.sampled is false", async () => {
-    vi.mocked(queries.getSiteByPublicToken).mockResolvedValue(MOCK_SITE);
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: false });
-    const { text } = await fetch_(req("/public/pub-tok-abc123"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
     expect(text).not.toContain("~est");
   });
 });

@@ -10,7 +10,7 @@
  *   /app/sources      — auth-gated Sources breakdown
  *   /app/geography    — auth-gated Geography breakdown
  *   /app/site/:id/*   — per-site sub-routes (same views filtered to one site)
- *   /public/:token    — read-only per-site view (no auth)
+ *   /share/:token     — public read-only single-site overview (no auth; ADR-0012)
  *   /live             — WebSocket proxy → SiteLive DO
  *
  * Auth (spec §7.2): HMAC-SHA256 signed HttpOnly cookie, Web Crypto only.
@@ -1182,26 +1182,166 @@ dashboard.get("/logout", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Route: /public/:token — read-only view (no auth required)
+// Public share-link surface: /share/:token — read-only, single-site, no auth
+// (launch-readiness Task 1, ADR-0012). Excluded from the root securityHeaders
+// middleware (src/index.ts) — this surface mints its own nonce and sets its
+// own complete hardening header set via publicSecurityHeaders below, so the
+// header and the nonce baked into the body always come from the same request.
 // ---------------------------------------------------------------------------
 
-dashboard.get("/public/:token", async (c) => {
-  const nonce = c.get("nonce");
+// Token shape pre-filter (Global Constraint 5): reject anything that isn't a
+// well-formed share token before it ever reaches D1. "shr_" + 43 URL-safe
+// chars matches the 32-byte CSPRNG token operators mint per docs/install.md.
+const SHARE_TOKEN_SHAPE = /^shr_[A-Za-z0-9_-]{43}$/;
+
+// Fully static — no nonce or token interpolation — so unknown, malformed, and
+// revoked tokens all produce byte-identical bodies (Global Constraint 5).
+const SHARE_NOT_FOUND_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not Found — Skopia</title></head>
+<body style="margin:0;height:100%;background:#0a0c11;font-family:sans-serif;">
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#6a7184;">Dashboard not found.</div>
+</body>
+</html>`;
+
+/**
+ * Complete hardening header set for /share/* responses: the same strict CSP
+ * (nonce + strict-dynamic, no unsafe-inline) and header set the root
+ * securityHeaders middleware applies to authed pages, plus X-Robots-Tag —
+ * duplicated locally rather than imported because /share/* mints its own
+ * nonce independent of the root middleware it is excluded from.
+ */
+function publicSecurityHeaders(nonce: string): Record<string, string> {
+  const csp = [
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `style-src 'self' 'nonce-${nonce}'`,
+    `style-src-attr 'unsafe-inline'`,
+    `default-src 'self'`,
+    `font-src 'self'`,
+    `img-src 'self' data:`,
+    `connect-src 'self'`,
+    `frame-ancestors 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+    `object-src 'none'`,
+  ].join("; ");
+
+  return {
+    "Content-Security-Policy": csp,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "X-Robots-Tag": "noindex, nofollow",
+  };
+}
+
+// Same views as the app sidebar minus Geography (not implemented until
+// launch-readiness Task 3) — filtered from NAV_ITEMS so the label/id source
+// never drifts from the authed sidebar.
+const PUBLIC_NAV_ITEMS = NAV_ITEMS.filter((item) => item.id !== "geography");
+
+function publicNav(activeView: string, token: string, rangeKey: string): string {
+  const navHtml = PUBLIC_NAV_ITEMS.map(({ id, label, href }) => {
+    const active = activeView === id;
+    const style = [
+      "display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:8px;",
+      "cursor:pointer;font-size:13.5px;",
+      active
+        ? "font-weight:500;color:#9fb4ff;background:rgba(77,134,255,.12);"
+        : "font-weight:400;color:#8b92a4;",
+    ].join("");
+    const dotStyle = active
+      ? "width:14px;height:14px;border-radius:3px;background:#4d86ff;"
+      : "width:14px;height:14px;border-radius:3px;border:1.5px solid #3a4150;";
+    // /app/pages → /share/:token/pages; /app (overview) → /share/:token.
+    const publicHref = href.replace(/^\/app/, `/share/${esc(token)}`);
+    const fullHref = `${publicHref}?range=${esc(rangeKey)}`;
+    return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
+  }).join("\n");
+
+  return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
+    <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
+      ${skopiaLogo()}
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
+    </div>
+    ${navHtml}
+    <a href="https://skopia.dev" style="margin-top:auto;font-size:12px;color:#6a7184;padding:10px 11px;">Powered by Skopia</a>
+  </div>`;
+}
+
+/**
+ * Layout for the public /share/:token surface. Mirrors appLayout's shape
+ * (sidebar + topbar + content) but strips everything that leaks the authed
+ * app: no site switcher, no /app or /login hrefs, no live WebSocket client.
+ * `onlineCount` renders the "online now" badge only when non-null — this
+ * task always passes null; launch-readiness Task 2 wires the real count via
+ * a server-side SITE_LIVE snapshot() read, never a public WebSocket.
+ */
+function publicLayout(
+  activeView: string,
+  token: string,
+  site: SiteRow,
+  headerRight: string,
+  content: string,
+  nonce: string,
+  rangeKey: string,
+  onlineCount: number | null,
+): string {
+  const onlineBadge =
+    onlineCount === null
+      ? ""
+      : `<div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
+      <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;"></span>
+      <span>${esc(String(onlineCount))} online now</span>
+    </div>`;
+
+  // Wires the range <select> to auto-submit its form on change — the strict
+  // CSP (no script-src-attr) blocks an inline onchange handler, same reason
+  // appLayout's navScript exists.
+  const rangeScript = `<script nonce="${nonce}">(function(){
+    var r=document.querySelector('select[name="range"]');
+    if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+  })();</script>`;
+
+  return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
+  ${publicNav(activeView, token, rangeKey)}
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+    <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">${esc(site.name)}</span>
+        <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;">
+        ${onlineBadge}
+        ${headerRight}
+      </div>
+    </div>
+    <div style="flex:1;overflow:auto;padding:28px 32px 40px;">
+      ${content}
+    </div>
+  </div>
+  ${rangeScript}
+</div>`;
+}
+
+// Overview
+dashboard.get("/share/:token", async (c) => {
+  const nonce = crypto.randomUUID().replace(/-/g, "");
   const token = c.req.param("token");
-  const rangeParam = c.req.query("range");
-  const range = parseRange(rangeParam);
+
+  if (!SHARE_TOKEN_SHAPE.test(token)) {
+    return c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(nonce));
+  }
 
   const site = await getSiteByPublicToken(c.env.DB, token);
-  if (!site)
-    return c.html(
-      htmlDoc(
-        "Not Found",
-        "",
-        "<div style='padding:60px;text-align:center;color:#6a7184;'>Dashboard not found.</div>",
-        nonce,
-      ),
-      404,
-    );
+  if (!site) {
+    return c.html(SHARE_NOT_FOUND_HTML, 404, publicSecurityHeaders(nonce));
+  }
+
+  const rangeParam = c.req.query("range");
+  const range = parseRange(rangeParam);
 
   const [cards, series, topPages, topSources, topCountries] = await Promise.all([
     getStatCards(c.env.DB, site.id, range),
@@ -1221,19 +1361,18 @@ dashboard.get("/public/:token", async (c) => {
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
   `;
 
-  const body = `<div style="max-width:1280px;margin:0 auto;padding:32px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;">
-      <div style="display:flex;align-items:center;gap:9px;">
-        ${skopiaLogo()}
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;color:#fff;">${esc(site.name)}</span>
-        <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
-      </div>
-      ${rangePicker(range.key, "")}
-    </div>
-    ${content}
-  </div>`;
+  const headerRight = rangePicker(range.key, "");
 
-  return c.html(htmlDoc(site.name, "", body, nonce));
+  return c.html(
+    htmlDoc(
+      site.name,
+      "",
+      publicLayout("overview", token, site, headerRight, content, nonce, range.key, null),
+      nonce,
+    ),
+    200,
+    publicSecurityHeaders(nonce),
+  );
 });
 
 // ---------------------------------------------------------------------------
