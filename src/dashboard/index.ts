@@ -1427,10 +1427,14 @@ async function cachedPublicResponse(
   return res;
 }
 
-// Overview
-dashboard.get("/share/:token", async (c) => {
-  const token = c.req.param("token");
-
+/**
+ * Resolve a share token to its site for a /share/:token/* route: the shape
+ * pre-filter (Global Constraint 5) runs before any D1 read, then an unknown
+ * or revoked token gets the same byte-identical 404 as a malformed one.
+ * Every /share/* route shares this exact resolution + 404 body — extracted
+ * here once Task 3 adds five more callers of it.
+ */
+async function resolveShareSite(c: Context<DashEnv>, token: string): Promise<SiteRow | Response> {
   if (!SHARE_TOKEN_SHAPE.test(token)) {
     return c.html(
       SHARE_NOT_FOUND_HTML,
@@ -1447,6 +1451,15 @@ dashboard.get("/share/:token", async (c) => {
       publicSecurityHeaders(crypto.randomUUID().replace(/-/g, "")),
     );
   }
+
+  return site;
+}
+
+// Overview
+dashboard.get("/share/:token", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
 
   const range = parseRange(c.req.query("range"));
   const cacheKey = `share:v1:${site.id}:overview:${range.key}:${todayUtc()}`;
@@ -1478,6 +1491,192 @@ dashboard.get("/share/:token", async (c) => {
       site.name,
       "",
       publicLayout("overview", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Pages
+dashboard.get("/share/:token/pages", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:pages:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopPages(c.env.DB, site.id, range, 50);
+
+    const content = breakdownTable(
+      [
+        { label: "Page", key: "label", mono: true },
+        { label: "Visitors", key: "visitors" },
+        { label: "Pageviews", key: "pageviews" },
+      ],
+      rows,
+    );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Pages — ${site.name}`,
+      "",
+      publicLayout("pages", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Sources
+dashboard.get("/share/:token/sources", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:sources:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopSources(c.env.DB, site.id, range, 50);
+
+    const content = breakdownTable(
+      [
+        { label: "Source", key: "label" },
+        { label: "Visitors", key: "visitors" },
+        { label: "Share", key: "share" },
+      ],
+      rows,
+    );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Sources — ${site.name}`,
+      "",
+      publicLayout("sources", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Devices
+dashboard.get("/share/:token/devices", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:devices:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const [devices, browsers, oses] = await Promise.all([
+      getTopDevices(c.env.DB, site.id, range, 10),
+      getTopBrowsers(c.env.DB, site.id, range, 10),
+      getTopOperatingSystems(c.env.DB, site.id, range, 10),
+    ]);
+
+    const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("Device type", devices, "#4d86ff")}
+      ${breakdownCard("Browser", browsers, "#7a5cff")}
+      ${breakdownCard("Operating system", oses, "#2bd888")}
+    </div>`;
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Devices — ${site.name}`,
+      "",
+      publicLayout("devices", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Campaigns (UTM)
+dashboard.get("/share/:token/campaigns", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:campaigns:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const [utmSources, utmMediums, utmCampaigns] = await Promise.all([
+      getTopUtmSources(c.env.DB, site.id, range, 10),
+      getTopUtmMediums(c.env.DB, site.id, range, 10),
+      getTopUtmCampaigns(c.env.DB, site.id, range, 10),
+    ]);
+
+    const content = `<div class="breakdown-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+      ${breakdownCard("UTM source", utmSources, "#4d86ff")}
+      ${breakdownCard("UTM medium", utmMediums, "#7a5cff")}
+      ${breakdownCard("UTM campaign", utmCampaigns, "#2bd888")}
+    </div>`;
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Campaigns — ${site.name}`,
+      "",
+      publicLayout("campaigns", token, site, headerRight, content, nonce, range.key, onlineCount),
+      nonce,
+    );
+
+    return { html, nonce };
+  });
+});
+
+// Custom events
+dashboard.get("/share/:token/events", async (c) => {
+  const token = c.req.param("token");
+  const site = await resolveShareSite(c, token);
+  if (site instanceof Response) return site;
+
+  const range = parseRange(c.req.query("range"));
+  const cacheKey = `share:v1:${site.id}:events:${range.key}:${todayUtc()}`;
+
+  return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const rows = await getTopEvents(c.env.DB, site.id, range, 50);
+
+    // dimension='event' counts one "pageview" per fire (event-dimensions.ts),
+    // so the column is labeled Count — Pageviews would be a lie here. Mirrors
+    // /app/events' empty state verbatim (same content builder).
+    const content =
+      rows.length === 0
+        ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
+      <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
+      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+    </div>`
+        : breakdownTable(
+            [
+              { label: "Event", key: "label", mono: true },
+              { label: "Count", key: "pageviews" },
+              { label: "Visitors", key: "visitors" },
+            ],
+            rows,
+          );
+
+    const headerRight = rangePicker(range.key, "");
+
+    const html = htmlDoc(
+      `Events — ${site.name}`,
+      "",
+      publicLayout("events", token, site, headerRight, content, nonce, range.key, onlineCount),
       nonce,
     );
 
