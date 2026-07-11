@@ -186,9 +186,12 @@ wrangler d1 execute skopia --remote \
 
 - **Cache window.** Share pages are cached at Cloudflare's edge for **60 seconds** for
   performance under heavy load. A revoked or rotated token can therefore serve a cached
-  page for up to 60 seconds after the revocation before 404ing. If you need instant
-  revocation, there is no per-request cache-busting option; the operator knob is to
-  redeploy the Worker.
+  page for up to 60 seconds after the revocation before 404ing. There is no per-request
+  cache-busting option and no operator action shortens this window — redeploying the
+  Worker does not help, since the cached entries live in the `CACHE` KV namespace and the
+  Cache API (`caches.default`), neither of which a Worker deploy touches. If sub-60-second
+  revocation matters for your use case, treat the ≤60s exposure window as a hard property
+  of the current design, not a tunable.
 
 ### Optional: rate-limiting
 
