@@ -1,10 +1,124 @@
-# Add Skopia to your site
+# Deploy and use Skopia
 
-This guide assumes you have already deployed Skopia to your own Cloudflare account
-(see the [README](../README.md#deploy)) and created your owner password at
-`/setup` on first dashboard load.
+## One-click deploy
 
-Throughout, replace `skopia.<your-subdomain>.workers.dev` with your Worker's actual
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jasonm4130/skopia)
+
+The button clones this repo into your account and provisions the following automatically
+from `wrangler.jsonc`:
+
+| Resource | How it's provisioned |
+|----------|----------------------|
+| D1 database | Auto-provisioned by the button |
+| KV namespaces (cache + salt) | Auto-provisioned by the button |
+| Durable Object (SiteLive) | Provisioned via DO migration |
+| Workers Analytics Engine dataset | Created on first write — nothing to do |
+| Static assets (fonts + vendor JS) | Shipped with the Worker — nothing to provision |
+
+**The button will prompt you for four secrets** (declared in `package.json`
+`cloudflare.bindings`). Generate them before you click:
+
+### Generating your secrets
+
+**`AUTH_COOKIE_SECRET`** — signs the dashboard session cookie.
+
+```sh
+openssl rand -hex 32
+```
+
+Paste the output when the Deploy wizard prompts for it.
+
+**`IDENTITY_HMAC_SECRET`** — hashes visitor identities for cookieless analytics. No two
+sites' hashes are comparable even if hosted by the same operator.
+
+```sh
+openssl rand -hex 32
+```
+
+**`CF_ACCOUNT_ID`** — your Cloudflare account ID, needed for Analytics Engine queries.
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages**.
+2. Your Account ID appears in the right-hand sidebar.
+
+**`WAE_API_TOKEN`** — lets the dashboard query your Analytics Engine data. This is the one
+secret you cannot generate with `openssl` — it must be minted in the Cloudflare API-token
+UI:
+
+1. Go to **My Profile → API Tokens → Create Token**.
+2. Choose **Create Custom Token**.
+3. Under *Permissions*, add: **Account → Account Analytics → Read**.
+4. Under *Account Resources*, select your account.
+5. Click **Continue to summary → Create Token**.
+6. Copy the token — it is shown only once.
+
+## CLI / advanced deploy
+
+```sh
+pnpm install
+pnpm build
+wrangler deploy
+```
+
+`pnpm build` regenerates the embedded files — `src/shared/schema-embed.ts`
+(cold-account D1 DDL) and `src/shared/skopia-embed.ts` (the minified tracking
+script) — so `wrangler deploy` never ships stale embedded content after a fresh
+clone or a migration change.
+
+### Generating your secrets (for CLI deploy)
+
+Before running `wrangler deploy`, set the four secrets as environment variables or in
+your local `.dev.vars` file (do not commit `.dev.vars`):
+
+**`AUTH_COOKIE_SECRET`** — signs the dashboard session cookie.
+
+```sh
+openssl rand -hex 32
+```
+
+**`IDENTITY_HMAC_SECRET`** — hashes visitor identities for cookieless analytics.
+
+```sh
+openssl rand -hex 32
+```
+
+**`CF_ACCOUNT_ID`** — your Cloudflare account ID.
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages**.
+2. Your Account ID appears in the right-hand sidebar.
+
+**`WAE_API_TOKEN`** — lets the dashboard query your Analytics Engine data.
+
+1. Go to **My Profile → API Tokens → Create Token**.
+2. Choose **Create Custom Token**.
+3. Under *Permissions*, add: **Account → Account Analytics → Read**.
+4. Under *Account Resources*, select your account.
+5. Click **Continue to summary → Create Token**.
+6. Copy the token — it is shown only once.
+
+### Local development
+
+Copy `.dev.vars.example` to `.dev.vars` and fill in the four secret values, then:
+
+```sh
+pnpm install
+pnpm dev
+```
+
+`wrangler dev` reads `.dev.vars` automatically.
+
+## After deploy
+
+- **Dashboard shows data** once `WAE_API_TOKEN` is set — it's what powers the Analytics
+  Engine queries behind every chart.
+- **Ingest works** once `IDENTITY_HMAC_SECRET` is set — without it the collector returns
+  `503` rather than signing with an undefined key.
+- On first dashboard load, a setup screen prompts you to create your owner password. This
+  is the only manual step after the Deploy wizard.
+
+## Add Skopia to your site
+
+Now that Skopia is deployed to your Cloudflare account, add the tracking snippet to your
+site. Replace `skopia.<your-subdomain>.workers.dev` with your Worker's actual
 URL (or your custom domain if you bound one).
 
 ## 1. Drop in the snippet
