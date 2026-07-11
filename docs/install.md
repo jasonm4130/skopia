@@ -126,6 +126,88 @@ the script drains the queue when it loads:
 </script>
 ```
 
+## 7. Public share links
+
+Share read-only analytics views with anyone, logged-out, at an unguessable URL.
+
+### Generate a share token
+
+Share links are controlled via a **public token** — a unique, unguessable identifier
+tied to a single site. Generate one with:
+
+```sh
+TOKEN="shr_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+echo $TOKEN
+```
+
+Then register it on your site:
+
+```sh
+wrangler d1 execute skopia --remote \
+  --command "UPDATE sites SET public_token='$TOKEN' WHERE id='default';"
+```
+
+Replace `default` with your site's ID if you have multiple sites.
+
+Once set, the share link is live immediately at `https://skopia.<your-subdomain>.workers.dev/share/$TOKEN`.
+The link exposes six views (overview, top pages, traffic sources, devices, campaigns, custom events)
+with read-only access — no authentication required.
+
+### Rotate or revoke
+
+**To rotate** (generate a new token and retire the old one in one command):
+
+```sh
+TOKEN="shr_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+wrangler d1 execute skopia --remote \
+  --command "UPDATE sites SET public_token='$TOKEN' WHERE id='default';"
+```
+
+The old share URL stops working immediately at the query layer. However, cached pages
+may serve for **up to 60 seconds** after revocation while the cache TTL expires — then
+404s (see cache behavior below).
+
+**To revoke entirely** (disable the share link):
+
+```sh
+wrangler d1 execute skopia --remote \
+  --command "UPDATE sites SET public_token=NULL WHERE id='default';"
+```
+
+### How it works
+
+- **Independence from collection.** Rotating or revoking a share token **never affects**
+  event collection from your site. The collector authenticates by site ID + origin allowlist
+  (see step 3); the share link uses a separate token. Collection keeps working regardless
+  of share-link changes.
+
+- **Independence from auth.** The share link does not use your dashboard login. You can
+  revoke it without affecting your own dashboard access, and vice-versa.
+
+- **Cache window.** Share pages are cached at Cloudflare's edge for **60 seconds** for
+  performance under heavy load. A revoked or rotated token can therefore serve a cached
+  page for up to 60 seconds after the revocation before 404ing. There is no per-request
+  cache-busting option, and a plain redeploy does **not** shorten the window — the cached
+  entries live in the `CACHE` KV namespace and the Cache API (`caches.default`), neither
+  of which a Worker deploy touches. The one emergency kill switch is a code change: bump
+  the `share:v1:` cache-key version in `src/dashboard/index.ts` and deploy, which orphans
+  every cached share page immediately (ADR-0012 §4). For normal operation, treat the ≤60 s
+  window as a property of the design.
+
+### Optional: rate-limiting
+
+The share route is open and read-only. If you want to add a rate-limiting rule to
+`/share/*` to protect against request floods, use Cloudflare's WAF:
+
+1. Log in to your Cloudflare account and go to **Security → WAF → Create rule**.
+2. Set the **Expression** to match the path: `http.request.uri.path contains "/share/"`
+3. Set the **Action** to **Rate limit** and choose your threshold (e.g., 100 requests per
+   minute per IP).
+
+This is optional; the default public surface is already protected by shape validation
+(malformed tokens are rejected instantly) and the Cache API (well-formed tokens hit the
+cache on repeat access).
+
 ## What the browser actually sends
 
 Only: the path + query string, the referrer, the document title, the screen width,
