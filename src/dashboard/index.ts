@@ -369,20 +369,38 @@ const BASE_CSS = `
   body{font-family:'Hanken Grotesk',sans-serif;color:#e8eaef;}
   a{color:inherit;text-decoration:none;}
   input,button,select,textarea{font-family:inherit;}
+  /* Default-margin resets so promoting divs to headings/lists/tables (a11y
+     semantics) doesn't regress the existing inline-styled spacing. */
+  h1,h2,h3,h4,h5,h6{margin:0;font-size:inherit;font-weight:inherit;}
+  ul,ol{margin:0;padding:0;list-style:none;}
+  table{border-collapse:collapse;}
+  /* Visually-hidden but AT-exposed (chart data table, table captions). */
+  .sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  /* Keyboard focus visibility (WCAG 2.4.7): a strong app-wide ring plus a
+     denser ring on form controls. Inputs must NOT set outline:none. */
+  :focus-visible{outline:2px solid #9fb4ff;outline-offset:2px;}
+  input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{border-color:#4d86ff;box-shadow:0 0 0 3px rgba(77,134,255,.35);}
   ::-webkit-scrollbar{width:10px;height:10px;}
   ::-webkit-scrollbar-thumb{background:#232838;border-radius:6px;}
   ::-webkit-scrollbar-track{background:transparent;}
   @keyframes skopiaPulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  /* Live-status dot: animate only when the user hasn't asked to reduce motion
+     (WCAG 2.3.3). Inline animation can't be overridden by a media query, so the
+     dots opt in via this class instead of an inline animation declaration. */
+  .live-dot{opacity:1;}
+  @media (prefers-reduced-motion: no-preference){.live-dot{animation:skopiaPulse 1.6s infinite;}}
   /* Mobile layout hooks — hidden on desktop; enabled in the @media block below. */
   .mobile-tabbar{display:none;}
   .mobile-only{display:none;}
   .mobile-more summary::-webkit-details-marker{display:none;}
   @media (max-width:768px){
+    /* Keep focused controls clear of the fixed bottom tab bar (WCAG 2.4.11). */
+    html{scroll-padding-bottom:84px;}
     .dash-sidebar{display:none!important;}
     .mobile-only{display:flex!important;}
     .mobile-tabbar{display:flex!important;position:fixed;left:0;right:0;bottom:0;z-index:50;align-items:stretch;justify-content:space-around;background:rgba(13,16,22,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid #1b1f29;padding:6px 4px calc(env(safe-area-inset-bottom,0px) + 8px);}
     .dash-topbar{padding:14px 16px!important;flex-wrap:wrap!important;gap:12px!important;}
-    .dash-content{padding:16px 16px 84px!important;}
+    .dash-content{padding:16px 16px 84px!important;scroll-padding-bottom:84px;}
     .stat-grid{grid-template-columns:repeat(2,1fr)!important;}
     .breakdown-grid{grid-template-columns:1fr!important;}
     .geo-layout{flex-direction:column!important;}
@@ -456,7 +474,7 @@ function siteSwitcher(
 function healthStatus(extraStyle = ""): string {
   return `<div style="${extraStyle}background:#161a23;border:1px solid #232838;border-radius:10px;padding:14px;">
       <div style="font-size:12px;color:#9aa1b2;line-height:1.5;margin-bottom:10px;">Running on your Worker. <span style="color:#2bd888;">Healthy.</span></div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">skopia · d1 ok</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8b92a4;">skopia · d1 ok</div>
     </div>`;
 }
 
@@ -479,7 +497,8 @@ function mobileTabbar(activeView: string, siteId: string, rangeKey: string): str
         : `${href}?range=${esc(rangeKey)}`;
       const color = active ? "#9fb4ff" : "#8b92a4";
       const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
-      return `<a href="${fullHref}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a>`;
+      const current = active ? ' aria-current="page"' : "";
+      return `<li style="flex:1;display:flex;"><a href="${fullHref}"${current} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(shortLabels[id] ?? label)}</a></li>`;
     })
     .join("\n");
 
@@ -490,19 +509,22 @@ function mobileTabbar(activeView: string, siteId: string, rangeKey: string): str
       const fullHref = siteId
         ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
         : `${href}?range=${esc(rangeKey)}`;
-      return `<a href="${fullHref}" style="display:block;padding:12px 4px;font-size:14px;color:${active ? "#9fb4ff" : "#cfd4e0"};border-bottom:1px solid #161a22;">${esc(label)}</a>`;
+      const current = active ? ' aria-current="page"' : "";
+      return `<li><a href="${fullHref}"${current} style="display:block;padding:12px 4px;font-size:14px;color:${active ? "#9fb4ff" : "#cfd4e0"};border-bottom:1px solid #161a22;">${esc(label)}</a></li>`;
     })
     .join("\n");
 
-  return `<nav class="mobile-tabbar">
+  return `<nav class="mobile-tabbar" aria-label="Mobile primary">
+    <ul style="display:flex;flex:1;align-items:stretch;justify-content:space-around;width:100%;">
     ${tabs}
-    <details class="mobile-more" style="flex:1;">
+    <li style="flex:1;display:flex;"><details class="mobile-more" style="flex:1;">
       <summary style="list-style:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:#8b92a4;cursor:pointer;height:100%;"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #3a4150;"></span>More</summary>
       <div style="position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 58px);background:#0d1016;border-top:1px solid #1b1f29;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);box-shadow:0 -14px 34px rgba(0,0,0,.5);">
-        ${moreLinks ? `<div style="margin-bottom:14px;">${moreLinks}</div>` : ""}
+        ${moreLinks ? `<ul style="margin-bottom:14px;">${moreLinks}</ul>` : ""}
         ${healthStatus()}
       </div>
-    </details>
+    </details></li>
+    </ul>
   </nav>`;
 }
 
@@ -523,7 +545,8 @@ function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey:
     const fullHref = siteId
       ? `${href}?site=${esc(siteId)}&range=${esc(rangeKey)}`
       : `${href}?range=${esc(rangeKey)}`;
-    return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
+    const current = active ? ' aria-current="page"' : "";
+    return `<li><a href="${fullHref}"${current} style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a></li>`;
   }).join("\n");
 
   // Site switcher: a <select> whose change event is wired by the nonced script
@@ -536,7 +559,7 @@ function sidebar(activeView: string, sites: SiteRow[], siteId: string, rangeKey:
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
     <div style="margin-bottom:24px;">${switcher}</div>
-    ${navHtml}
+    <nav aria-label="Primary"><ul>${navHtml}</ul></nav>
     ${healthStatus("margin-top:auto;")}
   </div>`;
 }
@@ -558,24 +581,33 @@ function appLayout(
     ss.forEach(function(s){s.addEventListener('change',function(){location.href='/app?site='+encodeURIComponent(s.value)+'&range='+encodeURIComponent(s.getAttribute('data-range')||'30d');});});
     var r=document.querySelector('select[name="range"]');
     if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+    // Escape closes the mobile "More" sheet and returns focus to its summary
+    // (WCAG 2.1.2 — no keyboard trap; a native <details> has no Escape default).
+    var more=document.querySelector('.mobile-more');
+    if(more){document.addEventListener('keydown',function(e){if(e.key==='Escape'&&more.open){more.open=false;var sm=more.querySelector('summary');if(sm)sm.focus();}});}
   })();</script>`;
+  // The visible topbar shows only the brand mark, and the desktop-vs-mobile
+  // brand elements are display:none per breakpoint — so neither can be the
+  // accessible <h1>. A single always-present sr-only <h1> per view carries the
+  // document title for assistive tech at every breakpoint (WCAG 2.4.6).
+  const viewLabel = NAV_ITEMS.find((n) => n.id === activeView)?.label ?? "Overview";
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
   ${sidebar(activeView, sites, site.id, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div class="dash-topbar" style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+    <header class="dash-topbar" style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div class="mobile-only" style="flex-basis:100%;align-items:center;gap:10px;min-width:0;">
         <div style="display:flex;align-items:center;gap:8px;flex:none;">${skopiaLogo()}<span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;color:#fff;">Skopia</span></div>
         <div style="flex:1;min-width:0;">${siteSwitcher(sites, site.id, rangeKey)}</div>
       </div>
-      <div id="live-badge" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
+      <div id="live-badge" role="status" aria-live="polite" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#2bd888;background:rgba(43,216,136,.1);padding:8px 13px;border-radius:8px;font-weight:500;">
+        <span class="live-dot" style="width:7px;height:7px;border-radius:50%;background:#2bd888;"></span>
         <span id="live-count">—</span> online now
       </div>
       ${headerRight}
-    </div>
-    <div class="dash-content" style="flex:1;overflow:auto;padding:28px 32px 40px;">
+    </header>
+    <main class="dash-content" style="flex:1;overflow:auto;padding:28px 32px 40px;"><h1 class="sr-only">${esc(site.name)} — ${esc(viewLabel)}</h1>
       ${content}
-    </div>
+    </main>
   </div>
   ${mobileTabbar(activeView, site.id, rangeKey)}
   ${navScript}
@@ -640,11 +672,11 @@ function statCardsHtml(cards: StatCards, sampled: boolean): string {
     .map(
       ({ label, value, tip }) =>
         `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:18px 20px;">
-      <div style="font-size:12.5px;color:#8b92a4;margin-bottom:10px;">${esc(label)}${
+      <h2 style="font-size:12.5px;font-weight:400;color:#8b92a4;margin-bottom:10px;">${esc(label)}${
         tip
-          ? ` <span title="${esc(tip)}" style="cursor:help;color:#6a7184;border-bottom:1px dotted #3a4150;">&#9432;</span>`
+          ? ` <span title="${esc(tip)}" style="cursor:help;color:#8b92a4;border-bottom:1px dotted #3a4150;">&#9432;</span>`
           : ""
-      }</div>
+      }</h2>
       <div style="display:flex;align-items:baseline;gap:8px;">
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:28px;color:#fff;letter-spacing:-.01em;">${esc(value)}${badge}</span>
       </div>
@@ -667,7 +699,7 @@ function timeSeriesChartHtml(
 ): string {
   if (series.length === 0) {
     return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;margin-bottom:20px;">
-      <span style="color:#6a7184;font-size:14px;">No data for this period.</span>
+      <span style="color:#8b92a4;font-size:14px;">No data for this period.</span>
     </div>`;
   }
 
@@ -713,16 +745,28 @@ function timeSeriesChartHtml(
     .map((i) => `<span>${esc(series[i]?.day.slice(5) ?? "")}</span>`)
     .join("");
 
+  // The SVG is decorative (aria-hidden); this visually-hidden table is the SINGLE
+  // accessible representation of the series (WCAG 1.1.1). Carries BOTH metrics so
+  // no data is hidden behind the visitors/pageviews toggle.
+  const srRows = series
+    .map(
+      (p) =>
+        `<tr><th scope="row">${esc(p.day)}</th><td>${esc(String(p.visitors))}</td><td>${esc(String(p.pageviews))}</td></tr>`,
+    )
+    .join("");
+  const srTable = `<table class="sr-only"><caption>Daily visitors and pageviews, ${esc(rangeLabel)}</caption><thead><tr><th scope="col">Date</th><th scope="col">Visitors</th><th scope="col">Pageviews</th></tr></thead><tbody>${srRows}</tbody></table>`;
+
   return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;margin-bottom:20px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
     <div style="display:flex;gap:7px;">
-      <button id="btn-visitors" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#4d86ff;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
-      <button id="btn-pageviews" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
+      <button id="btn-visitors" aria-pressed="true" style="cursor:pointer;font-size:12.5px;font-weight:600;color:#fff;background:#3568d6;padding:7px 14px;border-radius:7px;border:none;">Visitors</button>
+      <button id="btn-pageviews" aria-pressed="false" style="cursor:pointer;font-size:12.5px;font-weight:500;color:#9aa1b2;background:#1a1f2a;padding:7px 14px;border-radius:7px;border:none;">Pageviews</button>
     </div>
-    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6a7184;">${esc(rangeLabel)}</span>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8b92a4;">${esc(rangeLabel)}</span>
   </div>
+  ${srTable}
   <div style="position:relative;height:250px;" id="chart-wrap">
-    <svg id="chart-svg" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;">
+    <svg id="chart-svg" aria-hidden="true" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;">
       <defs>
         <linearGradient id="areaDash" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stop-color="#4d86ff" stop-opacity=".30"/>
@@ -740,11 +784,11 @@ function timeSeriesChartHtml(
     <div id="hover-tip" style="display:none;position:absolute;background:#0d1016;border:1px solid #2a3040;border-radius:10px;padding:11px 13px;box-shadow:0 14px 34px rgba(0,0,0,.6);pointer-events:none;z-index:5;">
       <div id="tip-date" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa1b2;margin-bottom:6px;"></div>
       <div style="display:flex;align-items:center;gap:7px;font-size:13px;color:#fff;white-space:nowrap;"><span style="width:8px;height:8px;border-radius:2px;background:#4d86ff;"></span> <span id="tip-visitors">0</span> visitors</div>
-      <div style="display:flex;align-items:center;gap:7px;font-size:13px;color:#cfd4e0;white-space:nowrap;margin-top:3px;"><span style="width:8px;height:8px;border-radius:2px;background:#6a7184;"></span> <span id="tip-pageviews">0</span> views</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:13px;color:#cfd4e0;white-space:nowrap;margin-top:3px;"><span style="width:8px;height:8px;border-radius:2px;background:#8b92a4;"></span> <span id="tip-pageviews">0</span> views</div>
     </div>
     <div style="position:absolute;inset:0;display:flex;" id="overlay-cells"></div>
   </div>
-  <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6a7184;margin-top:8px;">${axisLabels}</div>
+  <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#8b92a4;margin-top:8px;">${axisLabels}</div>
 </div>
 <script nonce="${nonce}">
 (function(){
@@ -769,10 +813,13 @@ function timeSeriesChartHtml(
     var r=computePaths(arr);
     document.getElementById('chart-line').setAttribute('d',r.line);
     document.getElementById('chart-area').setAttribute('d',r.area);
-    document.getElementById('btn-visitors').style.color=metric==='visitors'?'#fff':'#9aa1b2';
-    document.getElementById('btn-visitors').style.background=metric==='visitors'?'#4d86ff':'#1a1f2a';
-    document.getElementById('btn-pageviews').style.color=metric==='pageviews'?'#fff':'#9aa1b2';
-    document.getElementById('btn-pageviews').style.background=metric==='pageviews'?'#4d86ff':'#1a1f2a';
+    var bv=document.getElementById('btn-visitors'),bp=document.getElementById('btn-pageviews');
+    bv.style.color=metric==='visitors'?'#fff':'#9aa1b2';
+    bv.style.background=metric==='visitors'?'#3568d6':'#1a1f2a';
+    bv.setAttribute('aria-pressed',metric==='visitors'?'true':'false');
+    bp.style.color=metric==='pageviews'?'#fff':'#9aa1b2';
+    bp.style.background=metric==='pageviews'?'#3568d6':'#1a1f2a';
+    bp.setAttribute('aria-pressed',metric==='pageviews'?'true':'false');
 
     // rebuild overlay cells
     var wrap=document.getElementById('overlay-cells');
@@ -826,25 +873,25 @@ function timeSeriesChartHtml(
 function breakdownCard(title: string, rows: BreakdownRow[], barColor: string): string {
   if (rows.length === 0) {
     return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;">
-      <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">${esc(title)}</div>
-      <div style="color:#6a7184;font-size:13px;">No data.</div>
+      <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">${esc(title)}</h2>
+      <div style="color:#8b92a4;font-size:13px;">No data.</div>
     </div>`;
   }
   const rowsHtml = rows
     .map(
       (r) =>
-        `<div style="display:flex;align-items:center;gap:11px;">
+        `<li style="display:flex;align-items:center;gap:11px;">
       <span style="flex:none;width:124px;font-size:12.5px;color:#cfd4e0;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.label)}">${esc(r.label)}</span>
       <div style="flex:1;height:6px;border-radius:4px;background:#1c212c;">
         <div style="width:${Math.round(r.share * 100)}%;height:100%;border-radius:4px;background:${barColor};"></div>
       </div>
       <span style="flex:none;font-size:12px;color:#9aa1b2;width:48px;text-align:right;">${esc(fmtNum(r.visitors))}</span>
-    </div>`,
+    </li>`,
     )
     .join("\n");
   return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;">
-    <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">${esc(title)}</div>
-    <div style="display:flex;flex-direction:column;gap:13px;">${rowsHtml}</div>
+    <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">${esc(title)}</h2>
+    <ul style="display:flex;flex-direction:column;gap:13px;">${rowsHtml}</ul>
   </div>`;
 }
 
@@ -861,7 +908,9 @@ function breakdownTable(
       // Visitors here is the same daily-summed figure as the Overview stat
       // card — carry the same honest caveat as a native tooltip.
       const titleAttr = c.key === "visitors" ? ` title="${esc(VISITORS_TOOLTIP)}"` : "";
-      return `<span style="flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};"${titleAttr}>${esc(c.label)}</span>`;
+      const align = c.key === "label" ? "left" : "right";
+      const width = c.key === "label" ? "auto" : "120px";
+      return `<th scope="col" style="width:${width};text-align:${align};padding:14px 24px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:.1em;color:#8b92a4;border-bottom:1px solid #20252f;white-space:nowrap;"${titleAttr}>${esc(c.label)}</th>`;
     })
     .join("");
 
@@ -880,16 +929,30 @@ function breakdownTable(
           // built from sampled event data is not an exact count.
           const badge = c.key === "visitors" ? sampledBadge(r.sampled) : "";
           const mono = c.mono ? "font-family:'JetBrains Mono',monospace;" : "";
-          return `<span style="${mono}flex:none;width:${c.key === "label" ? "auto" : "120px"};${c.key === "label" ? "flex:1;" : ""}text-align:${c.key === "label" ? "left" : "right"};color:${c.key === "label" ? "#cfd4e0" : c.key === "visitors" ? "#fff" : "#9aa1b2"};">${val}${badge}</span>`;
+          const align = c.key === "label" ? "left" : "right";
+          const width = c.key === "label" ? "auto" : "120px";
+          const nowrap = c.key === "label" ? "" : "white-space:nowrap;";
+          const color = c.key === "label" ? "#cfd4e0" : c.key === "visitors" ? "#fff" : "#9aa1b2";
+          return `<td style="${mono}width:${width};text-align:${align};color:${color};padding:15px 24px;border-bottom:1px solid #161a22;font-size:13.5px;${nowrap}">${val}${badge}</td>`;
         })
         .join("");
-      return `<div style="display:flex;align-items:center;padding:15px 24px;border-bottom:1px solid #161a22;font-size:13.5px;">${cells}</div>`;
+      return `<tr>${cells}</tr>`;
     })
     .join("");
 
+  const caption = `${columns[0]?.label ?? "Breakdown"} breakdown`;
+
+  // overflow-x:auto + tabindex="0" makes the wide table horizontally scrollable
+  // AND keyboard-reachable on narrow screens (WCAG 1.4.10) instead of clipped by
+  // the card's overflow:hidden.
   return `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:8px 0;overflow:hidden;">
-    <div style="display:flex;padding:14px 24px;border-bottom:1px solid #20252f;font-family:'JetBrains Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#6a7184;">${headerCells}</div>
-    ${rowsHtml}
+    <div style="overflow-x:auto;" tabindex="0">
+      <table style="width:100%;border-collapse:collapse;">
+        <caption class="sr-only">${esc(caption)}</caption>
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -920,13 +983,13 @@ function liveScript(siteId: string, nonce: string): string {
         if(list&&Array.isArray(d.topPages)){
           list.textContent='';
           if(d.topPages.length===0){
-            var empty=document.createElement('span');
-            empty.style.cssText='color:#6a7184;font-size:13px;';
+            var empty=document.createElement('li');
+            empty.style.cssText='color:#8b92a4;font-size:13px;';
             empty.textContent='No one online right now.';
             list.appendChild(empty);
           }
           d.topPages.forEach(function(p){
-            var row=document.createElement('div');
+            var row=document.createElement('li');
             row.style.cssText='display:flex;align-items:center;gap:11px;';
             var label=document.createElement('span');
             label.style.cssText="flex:1;font-size:12.5px;color:#cfd4e0;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
@@ -952,36 +1015,40 @@ function liveScript(siteId: string, nonce: string): string {
 // Login / setup pages
 // ---------------------------------------------------------------------------
 
-function loginPage(nonce: string, error?: string): string {
+function loginPage(nonce: string, error?: string, email?: string): string {
   const errorHtml = error
-    ? `<div style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
+    ? `<div id="login-error" role="alert" style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
     : "";
+  // On a failed POST, mark the fields invalid and point them at the error
+  // banner (WCAG 3.3.1), and keep the entered email so it isn't retyped.
+  const invalid = error ? ` aria-invalid="true" aria-describedby="login-error"` : "";
+  const emailVal = email ? ` value="${esc(email)}"` : "";
   return htmlDoc(
     "Login",
     "",
-    `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
-    <div style="width:360px;">
+    `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    <div style="width:100%;max-width:360px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
         ${skopiaLogo()}
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:24px;">Sign in</div>
+        <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:24px;">Sign in</h1>
         ${errorHtml}
         <form method="post" action="/login">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Email</label>
-            <input name="email" type="email" autocomplete="email" required style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;outline:none;">
+            <label for="login-email" style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Email</label>
+            <input id="login-email" name="email" type="email" autocomplete="email" required${emailVal}${invalid} style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;">
           </div>
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Password</label>
-            <input name="password" type="password" autocomplete="current-password" required style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;outline:none;">
+            <label for="login-password" style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Password</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required${invalid} style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;">
           </div>
-          <button type="submit" style="width:100%;background:#4d86ff;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;">Sign in</button>
+          <button type="submit" style="width:100%;background:#3568d6;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;">Sign in</button>
         </form>
       </div>
     </div>
-  </div>`,
+  </main>`,
     nonce,
   );
 }
@@ -999,9 +1066,9 @@ function notConfiguredPage(nonce: string, missing: string[]): string {
   return htmlDoc(
     "Not configured",
     "",
-    `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
-    <div style="width:440px;background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
-      <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:12px;">Not configured</div>
+    `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    <div style="width:100%;max-width:440px;background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
+      <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:12px;">Not configured</h1>
       <div style="font-size:13.5px;color:#cfd4e0;line-height:1.6;margin-bottom:14px;">
         This Skopia instance is missing required secret${missing.length > 1 ? "s" : ""}: ${names}.
         Sessions cannot be signed safely until ${missing.length > 1 ? "they are" : "it is"} set.
@@ -1011,46 +1078,56 @@ function notConfiguredPage(nonce: string, missing: string[]): string {
         and set it as an encrypted secret, then redeploy. See the deploy docs (README).
       </div>
     </div>
-  </div>`,
+  </main>`,
     nonce,
   );
 }
 
-function setupPage(nonce: string, error?: string): string {
+function setupPage(
+  nonce: string,
+  error?: string,
+  email?: string,
+  invalidFields: readonly string[] = [],
+): string {
   const errorHtml = error
-    ? `<div style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
+    ? `<div id="setup-error" role="alert" style="color:#e08571;font-size:13px;margin-bottom:16px;">${esc(error)}</div>`
     : "";
+  // Only the field(s) that actually failed get aria-invalid — marking a valid
+  // field invalid misleads assistive tech (e.g. the email on a password mismatch).
+  const invalidAttr = (field: string): string =>
+    invalidFields.includes(field) ? ` aria-invalid="true" aria-describedby="setup-error"` : "";
+  const emailVal = email ? ` value="${esc(email)}"` : "";
   return htmlDoc(
     "Setup",
     "",
-    `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
-    <div style="width:400px;">
+    `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    <div style="width:100%;max-width:400px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
         ${skopiaLogo()}
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:8px;">Welcome to Skopia</div>
+        <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:8px;">Welcome to Skopia</h1>
         <div style="font-size:13px;color:#9aa1b2;margin-bottom:24px;">Create your owner account to get started.</div>
         ${errorHtml}
         <form method="post" action="/setup">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Email</label>
-            <input name="email" type="email" autocomplete="email" required style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;outline:none;">
+            <label for="setup-email" style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Email</label>
+            <input id="setup-email" name="email" type="email" autocomplete="email" required${emailVal}${invalidAttr("email")} style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;">
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Password</label>
-            <input name="password" type="password" autocomplete="new-password" minlength="8" required style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;outline:none;">
+            <label for="setup-password" style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Password</label>
+            <input id="setup-password" name="password" type="password" autocomplete="new-password" minlength="8" required${invalidAttr("password")} style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;">
           </div>
           <div style="margin-bottom:24px;">
-            <label style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Confirm Password</label>
-            <input name="confirm" type="password" autocomplete="new-password" required style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;outline:none;">
+            <label for="setup-confirm" style="display:block;font-size:13px;color:#9aa1b2;margin-bottom:6px;">Confirm Password</label>
+            <input id="setup-confirm" name="confirm" type="password" autocomplete="new-password" required${invalidAttr("confirm")} style="width:100%;background:#0d1016;border:1px solid #262b38;border-radius:8px;padding:10px 12px;font-size:14px;color:#e8eaef;">
           </div>
-          <button type="submit" style="width:100%;background:#4d86ff;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;">Create account</button>
+          <button type="submit" style="width:100%;background:#3568d6;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;">Create account</button>
         </form>
       </div>
     </div>
-  </div>`,
+  </main>`,
     nonce,
   );
 }
@@ -1090,13 +1167,19 @@ dashboard.post("/setup", async (c) => {
 
   const nonce = c.get("nonce");
   if (!email || !password) {
-    return c.html(setupPage(nonce, "Email and password are required."), 400);
+    const missing: string[] = [];
+    if (!email) missing.push("email");
+    if (!password) missing.push("password");
+    return c.html(setupPage(nonce, "Email and password are required.", email, missing), 400);
   }
   if (password.length < 8) {
-    return c.html(setupPage(nonce, "Password must be at least 8 characters."), 400);
+    return c.html(
+      setupPage(nonce, "Password must be at least 8 characters.", email, ["password"]),
+      400,
+    );
   }
   if (password !== confirm) {
-    return c.html(setupPage(nonce, "Passwords do not match."), 400);
+    return c.html(setupPage(nonce, "Passwords do not match.", email, ["password", "confirm"]), 400);
   }
 
   const pwHash = await hashPassword(password);
@@ -1170,7 +1253,7 @@ dashboard.post("/login", async (c) => {
   const valid = emailMatches && passwordOk;
 
   if (!valid) {
-    return c.html(loginPage(nonce, "Invalid email or password."), 401);
+    return c.html(loginPage(nonce, "Invalid email or password.", email), 401);
   }
 
   const expiry = Date.now() + COOKIE_MAX_AGE * 1000;
@@ -1207,7 +1290,7 @@ const SHARE_NOT_FOUND_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not Found — Skopia</title></head>
 <body style="margin:0;height:100%;background:#0a0c11;font-family:sans-serif;">
-<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#6a7184;">Dashboard not found.</div>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#8b92a4;">Dashboard not found.</div>
 </body>
 </html>`;
 
@@ -1265,7 +1348,8 @@ function publicNav(activeView: string, token: string, rangeKey: string): string 
     // /app/pages → /share/:token/pages; /app (overview) → /share/:token.
     const publicHref = href.replace(/^\/app/, `/share/${esc(token)}`);
     const fullHref = `${publicHref}?range=${esc(rangeKey)}`;
-    return `<a href="${fullHref}" style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a>`;
+    const current = active ? ' aria-current="page"' : "";
+    return `<li><a href="${fullHref}"${current} style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a></li>`;
   }).join("\n");
 
   return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
@@ -1273,8 +1357,8 @@ function publicNav(activeView: string, token: string, rangeKey: string): string 
       ${skopiaLogo()}
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
     </div>
-    ${navHtml}
-    <a href="https://skopia.dev" style="margin-top:auto;font-size:12px;color:#6a7184;padding:10px 11px;">Powered by Skopia</a>
+    <nav aria-label="Primary"><ul>${navHtml}</ul></nav>
+    <a href="https://skopia.dev" style="margin-top:auto;font-size:12px;color:#8b92a4;padding:10px 11px;">Powered by Skopia</a>
   </div>`;
 }
 
@@ -1315,19 +1399,19 @@ function publicLayout(
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
   ${publicNav(activeView, token, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+    <header style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div style="display:flex;align-items:center;gap:9px;">
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">${esc(site.name)}</span>
-        <span style="font-size:12px;color:#6a7184;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
+        <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">${esc(site.name)}</h1>
+        <span style="font-size:12px;color:#8b92a4;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
         ${onlineBadge}
         ${headerRight}
       </div>
-    </div>
-    <div style="flex:1;overflow:auto;padding:28px 32px 40px;">
+    </header>
+    <main style="flex:1;overflow:auto;padding:28px 32px 40px;">
       ${content}
-    </div>
+    </main>
   </div>
   ${rangeScript}
 </div>`;
@@ -1670,7 +1754,7 @@ dashboard.get("/share/:token/events", async (c) => {
       rows.length === 0
         ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
       <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
-      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+      <div style="color:#8b92a4;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
     </div>`
         : breakdownTable(
             [
@@ -1745,7 +1829,7 @@ dashboard.get("/app", async (c) => {
       htmlDoc(
         "No sites",
         "",
-        "<div style='padding:60px;text-align:center;color:#6a7184;line-height:1.6;'>No sites tracked yet.<br>Register one with <code style='color:#9fb4ff;'>wrangler d1 execute skopia --remote --command \"INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')\"</code>, then reload.</div>",
+        "<div style='padding:60px;text-align:center;color:#8b92a4;line-height:1.6;'>No sites tracked yet.<br>Register one with <code style='color:#9fb4ff;'>wrangler d1 execute skopia --remote --command \"INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')\"</code>, then reload.</div>",
         nonce,
       ),
     );
@@ -1772,12 +1856,12 @@ dashboard.get("/app", async (c) => {
     ${breakdownCard("Top countries", topCountries, "#2bd888")}
     <div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;margin-top:14px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#2bd888;animation:skopiaPulse 1.6s infinite;"></span>
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;">Active pages right now</span>
+        <span class="live-dot" style="width:7px;height:7px;border-radius:50%;background:#2bd888;"></span>
+        <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;">Active pages right now</h2>
       </div>
-      <div id="live-pages-list" style="display:flex;flex-direction:column;gap:13px;">
-        <span style="color:#6a7184;font-size:13px;">Waiting for live data&hellip;</span>
-      </div>
+      <ul id="live-pages-list" aria-live="polite" style="display:flex;flex-direction:column;gap:13px;">
+        <li style="color:#8b92a4;font-size:13px;">Waiting for live data&hellip;</li>
+      </ul>
     </div>
     ${liveScript(site.id, nonce)}
   `;
@@ -1881,13 +1965,13 @@ dashboard.get("/app/geography", async (c) => {
   const countryListHtml = rows
     .map(
       (r) =>
-        `<div style="display:flex;align-items:center;gap:11px;">
+        `<li style="display:flex;align-items:center;gap:11px;">
       <span style="flex:none;width:138px;font-size:13px;color:#cfd4e0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.label)}</span>
       <div style="flex:1;height:6px;border-radius:4px;background:#1c212c;">
         <div style="width:${Math.round(r.share * 100)}%;height:100%;border-radius:4px;background:#2bd888;"></div>
       </div>
       <span style="flex:none;font-size:12px;color:#9aa1b2;width:48px;text-align:right;">${esc(fmtNum(r.visitors))}</span>
-    </div>`,
+    </li>`,
     )
     .join("\n");
 
@@ -1901,16 +1985,16 @@ dashboard.get("/app/geography", async (c) => {
     <div class="geo-layout" style="display:flex;gap:14px;align-items:stretch;">
       <div style="flex:1.7;min-width:0;background:#12151d;border:1px solid #20252f;border-radius:12px;padding:22px 24px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#fff;">Visitors by country</div>
-          <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#6a7184;font-family:'JetBrains Mono',monospace;">
+          <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#fff;">Visitors by country</h2>
+          <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8b92a4;font-family:'JetBrains Mono',monospace;">
             low <span style="width:60px;height:7px;border-radius:4px;background:linear-gradient(90deg,#202634,#4d86ff);"></span> high
           </div>
         </div>
         <div id="skopia-map" style="width:100%;height:430px;"></div>
       </div>
       <div style="flex:1;min-width:0;background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">Top countries</div>
-        <div style="display:flex;flex-direction:column;gap:14px;">${countryListHtml}</div>
+        <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;margin-bottom:18px;">Top countries</h2>
+        <ul style="display:flex;flex-direction:column;gap:14px;">${countryListHtml}</ul>
       </div>
     </div>
     <script nonce="${nonce}">
@@ -2048,7 +2132,7 @@ dashboard.get("/app/events", async (c) => {
     rows.length === 0
       ? `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:60px 24px;text-align:center;">
       <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
-      <div style="color:#6a7184;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
+      <div style="color:#8b92a4;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
     </div>`
       : breakdownTable(
           [
