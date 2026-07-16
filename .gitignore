@@ -40,6 +40,9 @@ coverage/
 # Session recaps — local working notes, never committed
 docs/recaps/
 
+# Playwright MCP — local browser snapshots/artifacts, never committed
+.playwright-mcp/
+
 # Claude Code — local-only settings (machine-specific paths, never committed)
 .claude/settings.local.json
 
