@@ -1,8 +1,9 @@
 /**
  * Skopia design tokens — the source of truth (ADR-0009).
  *
- * Extracted verbatim from the inline values in `src/marketing/index.ts` and
- * `src/dashboard/index.ts`. This file is NOT imported by the Worker (Workers don't
+ * Extracted verbatim from the inline design values in `src/dashboard/index.ts`
+ * (originally also the marketing landing page, split out to skopia-www per
+ * ADR-0007). This file is NOT imported by the Worker (Workers don't
  * serve CSS from `src/`); it is the canonical reference that the marketing site
  * (skopia-www) copies into `public/tokens.css`. When tokens change, edit them HERE
  * and re-copy. Do not edit the marketing copy directly.
