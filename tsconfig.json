@@ -1,5 +1,5 @@
 {
-  // Worker code (collector, rollup, dashboard, marketing, shared, db, tests).
+  // Worker code (collector, rollup, dashboard, shared, db, tests).
   // workers-types only — NO `dom` lib (workers-types' `ExecutionContext` etc.
   // clash with it). The browser tracking script compiles separately under
   // tsconfig.script.json, which the `typecheck` script also runs.

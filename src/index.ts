@@ -1,9 +1,9 @@
 /**
  * Skopia — root Worker entry (single-Worker topology).
  *
- * One Worker hosts the collector route and the dashboard + marketing SSR.
+ * One Worker hosts the collector route and the dashboard SSR.
  * Bindings are shared (wrangler.jsonc). Feature agents implement their own
- * modules (collector / dashboard / marketing) and do not edit this wiring
+ * modules (collector / dashboard) and do not edit this wiring
  * beyond what their surface requires. Phase 2 (ADR-0011): the DO is the sole
  * `rollup_daily` writer — the cron trigger and its export handler are retired.
  */
@@ -11,7 +11,6 @@
 import { Hono } from "hono";
 import { handleCollect, handlePreflight } from "./collector";
 import { dashboard } from "./dashboard";
-import { marketing } from "./marketing";
 import { type AppEnv, securityHeaders } from "./shared/security-headers";
 import { SKOPIA_JS } from "./shared/skopia-embed";
 import type { Env } from "./shared/types";
@@ -23,7 +22,7 @@ export { SiteLive } from "./dashboard";
 const app = new Hono<AppEnv>();
 
 // Per-request CSP nonce + hardening headers on every response EXCEPT the
-// collector and the public share surface (dashboard, marketing still get
+// collector and the public share surface (the dashboard still gets
 // it). Mounted before routes so all of them inherit it. Task 7: `/e` serves a
 // body-less 204 to a <script> beacon, never a browser-rendered document — the
 // nonce mint + CSP/hardening header pass is pure cost with no security
@@ -56,11 +55,14 @@ app.get("/skopia.js", (c) =>
   }),
 );
 
-// App + marketing surfaces. Dashboard owns auth-gated routes and the realtime
-// proxy; marketing owns the public landing page. Order: dashboard first so its
-// concrete routes win, marketing as the catch-all for the public root.
+// App surface. Dashboard owns the auth-gated routes, the realtime proxy, and
+// the public /share/* surface. Marketing moved to its own repo + Worker
+// (skopia.dev; ADR-0007) — the product Worker no longer serves a landing page.
 app.route("/", dashboard);
-app.route("/", marketing);
+
+// Root redirect: a forker hitting the bare root gets the dashboard, not a 404
+// (ADR-0006 addendum / ADR-0007). The dashboard never binds a bare "/".
+app.get("/", (c) => c.redirect("/app"));
 
 export default {
   fetch: app.fetch,

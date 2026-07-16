@@ -14,7 +14,7 @@
  *   /live             — WebSocket proxy → SiteLive DO
  *
  * Auth (spec §7.2): HMAC-SHA256 signed HttpOnly cookie, Web Crypto only.
- * Never registers a bare "/" route — marketing pillar owns that.
+ * Never registers a bare "/" route — the root Worker redirects "/" → "/app" (ADR-0007).
  */
 
 import type { Context, Next } from "hono";
