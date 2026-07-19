@@ -1352,7 +1352,7 @@ function publicNav(activeView: string, token: string, rangeKey: string): string 
     return `<li><a href="${fullHref}"${current} style="${style}"><span style="${dotStyle}"></span>${esc(label)}</a></li>`;
   }).join("\n");
 
-  return `<div style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
+  return `<div class="dash-sidebar" style="flex:none;width:224px;background:#0d1016;border-right:1px solid #1b1f29;padding:24px 16px;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;">
     <div style="display:flex;align-items:center;gap:9px;padding:0 8px;margin-bottom:30px;">
       ${skopiaLogo()}
       <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">Skopia</span>
@@ -1360,6 +1360,46 @@ function publicNav(activeView: string, token: string, rangeKey: string): string 
     <nav aria-label="Primary"><ul>${navHtml}</ul></nav>
     <a href="https://skopia.dev" style="margin-top:auto;font-size:12px;color:#8b92a4;padding:10px 11px;">Powered by Skopia</a>
   </div>`;
+}
+
+// Public-surface bottom tab bar — the /share mirror of mobileTabbar(). Same
+// fixed-bar UX and breakpoint behavior, but every href targets the /share/:token
+// routes and the "More" sheet carries a "Powered by Skopia" link in place of the
+// authed health-status block. Hidden on desktop, shown by the max-width:768px
+// media query, exactly like the authed bar.
+function publicMobileTabbar(activeView: string, token: string, rangeKey: string): string {
+  const link = (item: (typeof PUBLIC_NAV_ITEMS)[number], inMore: boolean): string => {
+    const active = activeView === item.id;
+    const publicHref = item.href.replace(/^\/app/, `/share/${esc(token)}`);
+    const fullHref = `${publicHref}?range=${esc(rangeKey)}`;
+    const current = active ? ' aria-current="page"' : "";
+    if (inMore) {
+      return `<li><a href="${fullHref}"${current} style="display:block;padding:12px 4px;font-size:14px;color:${active ? "#9fb4ff" : "#cfd4e0"};border-bottom:1px solid #161a22;">${esc(item.label)}</a></li>`;
+    }
+    const color = active ? "#9fb4ff" : "#8b92a4";
+    const dot = active ? "background:#4d86ff;" : "border:1.5px solid #3a4150;";
+    return `<li style="flex:1;display:flex;"><a href="${fullHref}"${current} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:${color};"><span style="width:16px;height:16px;border-radius:4px;${dot}"></span>${esc(item.label)}</a></li>`;
+  };
+
+  const tabs = PUBLIC_NAV_ITEMS.slice(0, MOBILE_TAB_COUNT)
+    .map((i) => link(i, false))
+    .join("\n");
+  const moreLinks = PUBLIC_NAV_ITEMS.slice(MOBILE_TAB_COUNT)
+    .map((i) => link(i, true))
+    .join("\n");
+
+  return `<nav class="mobile-tabbar" aria-label="Mobile primary">
+    <ul style="display:flex;flex:1;align-items:stretch;justify-content:space-around;width:100%;">
+    ${tabs}
+    <li style="flex:1;display:flex;"><details class="mobile-more" style="flex:1;">
+      <summary style="list-style:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px 2px;font-size:11px;color:#8b92a4;cursor:pointer;height:100%;"><span style="width:16px;height:16px;border-radius:4px;border:1.5px solid #3a4150;"></span>More</summary>
+      <div style="position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 58px);background:#0d1016;border-top:1px solid #1b1f29;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);box-shadow:0 -14px 34px rgba(0,0,0,.5);">
+        ${moreLinks ? `<ul style="margin-bottom:14px;">${moreLinks}</ul>` : ""}
+        <a href="https://skopia.dev" style="display:block;font-size:12px;color:#8b92a4;padding:4px 0;">Powered by Skopia</a>
+      </div>
+    </details></li>
+    </ul>
+  </nav>`;
 }
 
 /**
@@ -1394,12 +1434,16 @@ function publicLayout(
   const rangeScript = `<script nonce="${nonce}">(function(){
     var r=document.querySelector('select[name="range"]');
     if(r&&r.form){r.addEventListener('change',function(){r.form.submit();});}
+    // Escape closes the mobile "More" sheet and restores focus to its summary
+    // (WCAG 2.1.2 — same handling as appLayout's navScript).
+    var more=document.querySelector('.mobile-more');
+    if(more){document.addEventListener('keydown',function(e){if(e.key==='Escape'&&more.open){more.open=false;var sm=more.querySelector('summary');if(sm)sm.focus();}});}
   })();</script>`;
 
   return `<div style="display:flex;min-height:100vh;background:#0a0c11;">
   ${publicNav(activeView, token, rangeKey)}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-    <header style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
+    <header class="dash-topbar" style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:20px 32px;border-bottom:1px solid #1b1f29;">
       <div style="display:flex;align-items:center;gap:9px;">
         <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#fff;">${esc(site.name)}</h1>
         <span style="font-size:12px;color:#8b92a4;background:#161a23;padding:3px 8px;border-radius:5px;">read-only</span>
@@ -1409,10 +1453,11 @@ function publicLayout(
         ${headerRight}
       </div>
     </header>
-    <main style="flex:1;overflow:auto;padding:28px 32px 40px;">
+    <main class="dash-content" style="flex:1;overflow:auto;padding:28px 32px 40px;">
       ${content}
     </main>
   </div>
+  ${publicMobileTabbar(activeView, token, rangeKey)}
   ${rangeScript}
 </div>`;
 }
