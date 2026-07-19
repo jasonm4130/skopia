@@ -14,6 +14,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { ensureSchema } from "../src/shared/schema";
+import { SCHEMA_SQL } from "../src/shared/schema-embed";
 
 describe("ensureSchema", () => {
   it("creates all expected tables on a fresh (empty) D1", async () => {
@@ -88,14 +89,24 @@ describe("ensureSchema", () => {
     expect(cols).toContain("sampled");
   });
 
-  it("embeds every migration, not just 0001 (regression: 0002's table must exist)", async () => {
+  it("replays the full migration chain in order (0002 creates then 0003 drops rollup_daily_shadow)", async () => {
+    // Prove the chain is create-then-drop, not merely "ends without the table"
+    // (which is also true of a chain that stopped at 0001 and never created it).
+    // The embed must CREATE the shadow table (0002) and then DROP it (0003), in
+    // that order.
+    const createIdx = SCHEMA_SQL.indexOf("CREATE TABLE IF NOT EXISTS rollup_daily_shadow");
+    const dropIdx = SCHEMA_SQL.indexOf("DROP TABLE IF EXISTS rollup_daily_shadow");
+    expect(createIdx).toBeGreaterThanOrEqual(0); // 0002's CREATE is embedded
+    expect(dropIdx).toBeGreaterThan(createIdx); // 0003's DROP follows it
+
+    // And after a cold replay of the full chain, 0003's DROP has removed what
+    // 0002 created. (The "every migration is embedded" invariant is otherwise
+    // enforced by build-schema's glob + the CI `git diff --exit-code
+    // src/shared/schema-embed.ts` check.)
     await ensureSchema(env.DB);
     const result = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name = 'rollup_daily_shadow'",
     ).all<{ name: string }>();
-    // rollup_daily_shadow is created by migrations/0002_rollup_shadow.sql. If the
-    // embed only contains 0001, a cold Deploy-button account lacks this table and
-    // DO shadow flushes fail silently (tech sweep D6).
-    expect(result.results.map((r) => r.name)).toContain("rollup_daily_shadow");
+    expect(result.results.map((r) => r.name)).not.toContain("rollup_daily_shadow");
   });
 });

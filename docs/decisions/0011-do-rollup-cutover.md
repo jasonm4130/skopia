@@ -92,6 +92,36 @@ and amended it as follows.
    rollup_daily[today]` copy immediately post-deploy (before the shadow is later
    dropped) — not required, left to the operator's judgment at deploy time.
 
+### Follow-up landed — 2026-07-19 (shadow drop)
+
+The retention window in Amendment 2 has elapsed (≥1 settled day post-cutover), so the
+shadow-drop follow-up (Operational checklist item 5) has now shipped:
+
+- `src/rollup/index.ts` (the retained manual WAE→`rollup_daily` recompute backstop) is
+  **deleted** — it had no callers and the Worker never exported `scheduled()`.
+- `rollup_daily_shadow` is **dropped** via a new append-only migration
+  `migrations/0003_drop_rollup_shadow.sql` (`DROP TABLE IF EXISTS`); migration 0002 is left
+  in place so live DBs replay 0002→0003 in order. The embedded schema
+  (`src/shared/schema-embed.ts`) was regenerated (2→3 migrations).
+- **How the drop reaches a live database:** the same way all schema does in this project —
+  through `ensureSchema`'s embedded chain on the next dashboard/setup request, not via
+  `wrangler d1 migrations apply`. The Deploy-button D1 is created empty and never migrated
+  by wrangler (`src/shared/schema.ts`); `migrations/` is only the *source* build-schema
+  globs into the embed. So `wrangler deploy` (Operational checklist item 2) does not itself
+  apply the drop — the next dashboard read does, idempotently (`DROP TABLE IF EXISTS`). A
+  deployment that only ever ingests and whose dashboard is never opened keeps the empty,
+  unused shadow table until first read; that is harmless (no reader, no writer, negligible
+  space). Operators who want the drop applied eagerly at deploy time can run
+  `wrangler d1 migrations apply skopia --remote`, but it is not required.
+- The "RETAINED … until the shadow-drop follow-up" comments in the deleted module, in the
+  collector's fire-and-forget catch block, and in the embedded 0002 comment are removed.
+
+Consequently the "Rollback story" above and the "committed to keep them in the codebase"
+note in Consequences are now **historical**: the clean redeploy-the-prior-Worker rollback
+no longer exists (the shadow table is gone). WAE still retains the raw events, so a manual
+recompute of any affected day remains possible from the WAE SQL API if a parity spot-check
+ever surfaces loss.
+
 ## Fire-and-forget re-justification
 
 The collector delivers each event to the `SiteLive` DO via `ctx.waitUntil(fetch(...))`
@@ -103,10 +133,11 @@ the cron retired, a swallowed DO-delivery failure is now a **bounded, permanent*
 `rollup_daily` from it automatically).
 
 Accepted as-is because: such failures are rare (DO restarts or overload, not routine
-delivery), WAE retains the raw events and `src/rollup/index.ts` remains available for a
-manual recompute of any affected day, and the alternative (per-event retry or a queue in
-front of the DO) adds meaningful complexity for a loss rate that has not been observed to
-matter at current scale. **Revisit this if a parity spot-check ever surfaces measurable
+delivery), WAE retains the raw events so a manual recompute of any affected day remains
+possible from the WAE SQL API (the `src/rollup/index.ts` recompute logic was removed in the
+2026-07-19 shadow-drop follow-up above — restore it from git history if ever needed), and
+the alternative (per-event retry or a queue in front of the DO) adds meaningful complexity
+for a loss rate that has not been observed to matter at current scale. **Revisit this if a parity spot-check ever surfaces measurable
 loss** — that would be the signal the accepted rate is no longer negligible.
 
 ## Rollback story

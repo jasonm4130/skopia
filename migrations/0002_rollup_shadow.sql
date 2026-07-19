@@ -1,8 +1,8 @@
 -- Phase-1 parallel-run target for the DO incremental rollup
 -- (docs/specs/2026-06-29-do-incremental-counters-design.md §9). Identical shape
--- to rollup_daily. The DO writes here while the cron still owns rollup_daily;
--- after parity is confirmed (Phase 2) the DO repoints to rollup_daily and this
--- table is dropped.
+-- to rollup_daily. Superseded at the Phase-2 cutover (ADR-0011): the DO became
+-- the sole writer of rollup_daily and this table was dropped by
+-- migrations/0003_drop_rollup_shadow.sql. Retained here as append-only history.
 CREATE TABLE IF NOT EXISTS rollup_daily_shadow (
   site_id   TEXT NOT NULL,
   day       TEXT NOT NULL,
