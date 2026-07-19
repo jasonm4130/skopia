@@ -157,6 +157,22 @@ describe("GET /share/:token", () => {
     expect(headerNonce).toBe(bodyNonce);
   });
 
+  it("wears the responsive layout classes and a public-safe mobile tab bar", async () => {
+    const { text } = await fetch_(req(`/share/${VALID_TOKEN}`));
+    // The @media(max-width:768px) rules key off these classes; without them the
+    // public surface renders a fixed 224px sidebar squeezing content on a phone.
+    expect(text).toContain('class="dash-sidebar"');
+    expect(text).toContain('class="dash-topbar"');
+    expect(text).toContain('class="dash-content"');
+    // A public bottom tab bar mirrors the authed one but stays public-safe.
+    expect(text).toContain('class="mobile-tabbar"');
+    // Its tabs link the /share surface, never the authed /app routes...
+    expect(text).toMatch(new RegExp(`class="mobile-tabbar"[\\s\\S]*/share/${VALID_TOKEN}`));
+    // ...and the authed health-status block never leaks into the public sheet.
+    expect(text).not.toContain("skopia · d1 ok");
+    expect(text).not.toContain("Running on your Worker");
+  });
+
   // Migrated from the old /public/:token suite (dashboard.test.ts):
   // read-only badge, breakdown cards, and range picker carry over unchanged.
   it("renders the read-only badge, top-pages/top-sources breakdown, and the range picker", async () => {
