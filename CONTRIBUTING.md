@@ -48,9 +48,10 @@ The repository layout is documented in the [README](./README.md#repository-layou
 The browser script in `src/script/skopia.ts` ships to **every visitor of every
 tracked site**, so its size is a product guarantee, not a nice-to-have:
 
-- **Hard budget: < 2 KB gzipped**, enforced in CI (`pnpm check:size`).
-- **No cookies / `localStorage` / `sessionStorage` / `indexedDB`** — audited in CI
-  (`pnpm check:cookieless`).
+- **Hard budget: < 2 KB gzipped**, enforced by `pnpm check:size` (part of the pre-PR
+  `pnpm run ci` gate).
+- **No cookies / `localStorage` / `sessionStorage` / `indexedDB`** — audited by
+  `pnpm check:cookieless`.
 - **No external/runtime dependencies** in the script or Worker bundle
   (`pnpm check:no-external`).
 
@@ -69,11 +70,12 @@ budget, that's a discussion to have in an issue first.
 Run the full gate and make sure it is green:
 
 ```sh
-pnpm ci
+pnpm run ci
 ```
 
-This runs typecheck + lint + tests + build + the three script audits. Quote the
-green result in your PR description.
+This runs typecheck + lint + tests + build + the three script audits. (Use
+`pnpm run ci`, not `pnpm ci` — the latter is pnpm's clean-install built-in.) Quote
+the green result in your PR description.
 
 Guidelines for the PR itself:
 

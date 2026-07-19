@@ -1,5 +1,9 @@
 # Stratus — Phase 0 + 1 (Walking Skeleton) Implementation Plan
 
+> **STATUS: SHIPPED (historical).** The Phase 0/1 walking skeleton is the foundation the
+> current product was built on (MVP on `build/mvp`, since evolved well past this plan).
+> Kept as the durable record; checkboxes were tracked during execution, not ticked here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the end-to-end loop — a pageview fired by a sub-2 KB script lands in Workers Analytics Engine, is rolled up into D1, and appears as a time-series on an auth-gated dashboard for one seeded site.

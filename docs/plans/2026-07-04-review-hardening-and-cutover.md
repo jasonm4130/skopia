@@ -1,5 +1,8 @@
 # 2026-07-04 — Review hardening + Phase-2 cutover
 
+> **STATUS: SHIPPED.** The review findings were fixed and the Phase-2 cutover landed — see
+> [ADR-0011](../decisions/0011-do-rollup-cutover.md).
+
 Executes the verified findings of the 2026-07-04 four-agent review (3 code reviewers +
 tech-lead design iteration) and the amended Phase-2 cutover. Design rationale and
 measurements: `docs/research/2026-07-04-do-counters-design-iteration.md`. Parent plan

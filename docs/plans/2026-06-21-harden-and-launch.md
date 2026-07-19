@@ -1,5 +1,10 @@
 # Harden-and-Launch Sprint — Implementation Plan
 
+> **STATUS: SHIPPED (historical).** This early hardening sprint landed; later hardening is
+> continued in
+> [`2026-07-04-review-hardening-and-cutover.md`](2026-07-04-review-hardening-and-cutover.md).
+> Durable record; checkboxes were tracked during execution.
+
 > **For agentic workers:** execute task-by-task; each task ends with an independently testable
 > deliverable and a commit. Steps use checkbox (`- [ ]`) syntax.
 

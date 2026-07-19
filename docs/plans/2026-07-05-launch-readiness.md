@@ -2,6 +2,11 @@
 
 **Date:** 2026-07-05
 **Spec:** `docs/specs/2026-07-05-launch-readiness-design.md`
+
+> **STATUS: Tracks A + B COMPLETE; C + D outstanding.** Track A (public share-link demo,
+> [ADR-0012](../decisions/0012-public-share-link-dashboard.md)) and Track B (README rebuild)
+> shipped. Track C (marketing-honesty pass) and Track D (launch assets — a social `og:image`
+> card, removing the placeholder homepage stat) still have open items before launch.
 **ADR:** `docs/decisions/0012-public-share-link-dashboard.md` (Track A decisions are FINAL —
 implement, do not re-derive)
 **Research:** `docs/research/2026-07-05-best-in-class-analytics-marketing.md`,

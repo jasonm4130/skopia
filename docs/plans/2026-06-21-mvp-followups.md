@@ -1,5 +1,8 @@
 # Stratus — MVP Follow-ups (post-build)
 
+> **STATUS: RESOLVED (historical).** The HIGH / correctness / security / honesty findings
+> captured here were actioned in the follow-up commits described below.
+
 Captured 2026-06-21 after building the MVP on `build/mvp` and running an adversarial
 review pass. The HIGH and clear correctness/security/honesty findings were fixed in
 `f22920c` ("Remediate reviewer findings"). The items below were **deliberately deferred** —

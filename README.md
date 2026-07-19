@@ -15,7 +15,7 @@ privacy-first Google Analytics alternative with nothing to run.**
   persistent ID. [How it works →](docs/privacy.md#2-the-visitor-id-precisely)
 - **A 554 B gzipped tracking script** (≤ 2 KB budget) —
   [`src/script/skopia.ts`](src/script/skopia.ts), verified by
-  [`scripts/check-script-size.mjs`](scripts/check-script-size.mjs), run via `pnpm ci`.
+  [`scripts/check-script-size.mjs`](scripts/check-script-size.mjs), run via `pnpm run ci`.
 - **Public, read-only share links** — full dashboard views anyone can open logged-out, cached
   at the edge. [Mint one →](docs/install.md#7-public-share-links)
 - **Custom events** with low-cardinality props, capped at 512 bytes.
@@ -24,7 +24,7 @@ privacy-first Google Analytics alternative with nothing to run.**
   share link. [Docs →](docs/install.md#4-track-more-than-one-site)
 - **Everything lives in your Cloudflare account** — Workers, D1, KV, Durable Objects, Workers
   Analytics Engine. Nothing calls home to the Skopia project, enforced by
-  [`scripts/check-no-external.mjs`](scripts/check-no-external.mjs), run via `pnpm ci`.
+  [`scripts/check-no-external.mjs`](scripts/check-no-external.mjs), run via `pnpm run ci`.
 
 ## Deploy
 
