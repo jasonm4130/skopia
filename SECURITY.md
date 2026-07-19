@@ -44,15 +44,19 @@ Understanding the design helps you report meaningful issues.
   Deploy-button prompts. `.dev.vars` is gitignored. The collector **fails closed** —
   it returns `503` rather than signing visitor IDs with an undefined key.
 - **Dashboard authentication.** The owner password is hashed with **PBKDF2-SHA256,
-  210,000 iterations**, using a 32-byte random salt. Sessions are **stateless,
+  100,000 iterations**, using a 16-byte random salt (the Cloudflare Workers runtime
+  caps PBKDF2 at 100k iterations). Sessions are **stateless,
   HMAC-signed cookies** (`AUTH_COOKIE_SECRET`) — there is no server-side session
   store to leak.
 - **Cookieless visitor identity.** Visitor IDs are a daily-salted HMAC over
   `(salt, ip, ua, site_id)`. The raw IP is never persisted, and the salt rotates at
   UTC midnight (previous day deleted), preventing cross-day correlation. See
   [docs/privacy.md](./docs/privacy.md).
-- **Content Security Policy.** Every response carries a per-request nonce with
-  `'strict-dynamic'`; there are no inline scripts without a nonce.
+- **Content Security Policy.** Every response carries a CSP nonce with
+  `'strict-dynamic'`; there are no inline scripts without a nonce. Authenticated
+  pages use a per-request nonce; cached public `/share` pages use a per-cache-entry
+  nonce (shared within the ≤60s cache window) — see
+  [ADR-0012](./docs/decisions/0012-public-share-link-dashboard.md).
 - **CORS.** The collector validates each beacon's `Origin` against a per-site
   allowlist; once an allowlist is set, headerless and off-list requests are rejected.
 - **Bot filtering.** Obvious automated traffic is dropped before it is stored.

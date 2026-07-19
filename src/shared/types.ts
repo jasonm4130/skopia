@@ -84,8 +84,7 @@ export interface Beacon {
  * Limits honored: 1 index (≤96 B), ≤20 blobs (≤16 KB total), ≤20 doubles.
  *
  * This interface is the human-readable view of the data point; serialize it with
- * {@link toDataPoint} when writing and parse SQL rows back with the
- * {@link WaeRow} field names below.
+ * {@link toDataPoint} when writing.
  */
 export interface WaeEvent {
   /** index1 — site_id (the partition key; never a per-visitor id). */
@@ -171,36 +170,6 @@ export interface WaeDataPoint {
   doubles: number[];
 }
 
-/**
- * A row returned by the WAE SQL API, with the slot columns aliased to the
- * field names above. WAE SQL exposes raw slots as `index1`, `blob1..N`,
- * `double1..N`, plus `_sample_interval` and `timestamp` — rollup queries SELECT
- * these and alias them; this type documents the canonical column set.
- */
-export interface WaeRow {
-  index1: string;
-  blob1: string;
-  blob2: string;
-  blob3: string;
-  blob4: string;
-  blob5: string;
-  blob6: string;
-  blob7: string;
-  blob8: string;
-  blob9: string;
-  blob10: string;
-  blob11: string;
-  blob12: string;
-  blob13: string;
-  double1: number;
-  double2: number;
-  double3: number;
-  /** WAE sampling weight; multiply to correct counts (spec §4.1). */
-  _sample_interval: number;
-  /** Event timestamp (WAE-assigned). */
-  timestamp: string;
-}
-
 // ---------------------------------------------------------------------------
 // D1 row types  — spec §4.2 / migrations/0001_init.sql
 // ---------------------------------------------------------------------------
@@ -246,17 +215,6 @@ export type RollupDimension =
   | "browser"
   | "os"
   | "event";
-
-export interface RollupDailyRow {
-  site_id: string;
-  day: string;
-  dimension: RollupDimension;
-  dim_value: string;
-  pageviews: number;
-  visitors: number;
-  /** SQLite has no boolean; 0 | 1 (spec §5.1). */
-  sampled: 0 | 1;
-}
 
 // ---------------------------------------------------------------------------
 // Dashboard view-models  — what src/db/queries.ts returns and the SSR renders

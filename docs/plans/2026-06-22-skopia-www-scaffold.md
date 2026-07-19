@@ -1,7 +1,8 @@
 # Plan: Scaffold `skopia-www` (static Astro marketing site)
 
-> Status: in progress (2026-06-22). Tracked as a `/goal`. This is the durable record;
-> the per-session plan-mode scratch file is disposable.
+> **STATUS: COMPLETE.** `skopia-www` was scaffolded and is deployed as a static Astro site
+> (see [ADR-0007](../decisions/0007-marketing-separate-repo-static-astro.md)). This is the
+> durable record; the per-session plan-mode scratch file is disposable.
 
 ## Context
 

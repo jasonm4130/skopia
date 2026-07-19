@@ -1,5 +1,10 @@
 # Event-Driven DO Incremental Counters — Implementation Plan
 
+> **STATUS: SHIPPED.** The event-driven Durable Object incremental counters are live — see
+> [ADR-0010](../decisions/0010-do-pending-durability.md) and
+> [ADR-0011](../decisions/0011-do-rollup-cutover.md) (the DO is now the sole `rollup_daily`
+> writer).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the 5-minute WAE-polling cron rollup with event-driven incremental counters in the per-site `SiteLive` Durable Object, flushing daily aggregates to D1 `rollup_daily` on a short post-activity alarm.

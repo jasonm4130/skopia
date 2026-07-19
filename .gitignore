@@ -52,3 +52,6 @@ worker-configuration.d.ts
 
 # Session handoff docs (local-only)
 /.claude/handoffs/
+
+# Transient agent worktrees (created by isolated subagents; never committed)
+/.claude/worktrees/

@@ -17,9 +17,11 @@ overrides default behavior. Read it before acting.
 - **Positioning:** Open-source, **self-host on your own Cloudflare account**. One deploy =
   one owner's sites. No multi-tenant billing, no SaaS control plane (yet). Easy `deploy`
   is a first-class feature.
-- **Differentiation:** *Deliberately undecided.* The strongest defensible angle (privacy-
-  first vs. Cloudflare-edge-native vs. GA4-parity) is being chosen from research by the
-  product + tech-lead agents. Do not assume — check `docs/specs/` for the decided thesis.
+- **Differentiation:** **Privacy-first** is the decided thesis (see
+  `docs/specs/2026-06-21-product-spec.md` §1 "Differentiation thesis" and the README
+  tagline): cookieless by default, no cross-site identifiers, no raw PII at rest.
+  ADR-0002 rejects identity schemes that would void it. Don't relitigate without a new
+  spec or ADR.
 - **Non-goals (for now):** Multi-tenant SaaS billing, ad-tech/PII profiling, cross-site
   user tracking, a hosted offering. Revisit only if the spec says so.
 

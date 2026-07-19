@@ -6,13 +6,20 @@ human-approved.
 
 Naming: `YYYY-MM-DD-<topic>.md`
 
-Expected specs:
+Specs on file:
 
-- **Product spec** — differentiation thesis, personas, prioritized roadmap (RICE/MoSCoW),
-  MVP scope (in/out), success metrics. (owner: product-manager)
-- **Technical spec** — end-to-end architecture (collection → ingestion → storage → query →
-  dashboard → deploy), cost/scale model, binding plan. (owner: cloudflare-tech-lead)
-- **End-to-end product plan** — the synthesis that ties product + technical together into a
-  build sequence.
+- [`2026-06-21-product-spec.md`](2026-06-21-product-spec.md) — differentiation thesis,
+  personas, prioritized roadmap, MVP scope, success metrics. (product-manager)
+- [`2026-06-21-technical-spec.md`](2026-06-21-technical-spec.md) — end-to-end architecture
+  (collection → ingestion → storage → query → dashboard → deploy), cost/scale model,
+  binding plan. (cloudflare-tech-lead)
+- [`2026-06-21-product-plan.md`](2026-06-21-product-plan.md) — the synthesis that ties
+  product + technical together into a build sequence.
+- [`2026-06-29-do-incremental-counters-design.md`](2026-06-29-do-incremental-counters-design.md)
+  — the SiteLive Durable Object incremental-counter design.
+- [`2026-07-03-feature-roadmap.md`](2026-07-03-feature-roadmap.md) — the prioritized
+  post-MVP feature roadmap.
+- [`2026-07-05-launch-readiness-design.md`](2026-07-05-launch-readiness-design.md) — the
+  launch-readiness workstreams (demo, README, marketing honesty, launch assets).
 
 Specs reference the ADRs in `../decisions/` for the *why* behind technical choices.
