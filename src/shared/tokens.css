@@ -21,7 +21,7 @@
   --color-text-primary: #e8eaef;
   --color-text-secondary: #9aa1b2;
   --color-text-muted: #8b92a4;
-  --color-text-dim: #6a7184;
+  --color-text-dim: #7b8296; /* AA >=4.5:1 on all surfaces; was #6a7184 (~4:1, sub-AA for text) */
   --color-text-faint: #5a6072;
   --color-text-meta: #9097a8;
   --color-accent: #4d86ff;
