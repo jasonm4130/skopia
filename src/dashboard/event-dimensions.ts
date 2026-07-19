@@ -1,8 +1,9 @@
 /**
  * Pure dimension fan-out for the DO incremental rollup (spec §5).
  *
- * Mirrors the old cron's GROUP-BY semantics (src/rollup/index.ts:48-60, 309-348)
- * exactly so rollup_daily stays byte-compatible:
+ * Mirrors the old cron's GROUP-BY semantics (the since-removed src/rollup/index.ts,
+ * deleted in ADR-0011's shadow-drop follow-up — see git history) exactly so
+ * rollup_daily stays byte-compatible:
  *   - 11 dimensions; `referrer` empty -> "(direct)"; other empty values skipped.
  *   - pageview metric is is_pageview for every dim EXCEPT `event`, which counts
  *     each fire (metric 1) so the events breakdown is non-empty.

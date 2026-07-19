@@ -375,8 +375,8 @@ export async function handleCollect(
         .catch(() => {
           // Bounded, accepted loss (ADR-0011): the cron reconciler is retired,
           // so a dropped DO delivery is no longer self-healed automatically.
-          // WAE retains the raw events for manual recompute via
-          // src/rollup/index.ts until the shadow-drop follow-up PR.
+          // WAE still retains the raw events, so any affected day can be
+          // recomputed manually from WAE if a parity spot-check ever shows loss.
         }),
     );
 
