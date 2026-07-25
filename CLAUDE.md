@@ -3,7 +3,9 @@
 > **Skopia** (Greek *skopeín*, "to observe"; domain **skopia.dev**) — a privacy-respecting,
 > self-hostable web analytics tool built *entirely* on the Cloudflare developer platform.
 > Think Plausible/Umami, but where the storage, compute, ingestion, and dashboard all run on
-> Cloudflare primitives (Workers, Analytics Engine / D1 / R2, Durable Objects, Pages).
+> Cloudflare primitives (Workers, D1, KV, Durable Objects, Workers Analytics Engine). R2 is
+> an opt-in, not-MVP archival seam (commented out in `wrangler.jsonc`); Pages isn't used
+> (maintenance-mode per ADR-0007/ADR-0005).
 
 This file is the operating contract for any AI agent or human working in this repo. It
 overrides default behavior. Read it before acting.

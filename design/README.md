@@ -60,7 +60,7 @@ Build mapping:
 **To preview the originals:** open the Claude Design project. To render locally you would need to load
 React + ReactDOM as globals before `support.js` (the files don't include them).
 
-**To re-sync after editing in Claude Design:** re-import via the `claude_design` MCP `get_file` for each
+**To re-sync after editing in Claude Design:** re-import via the `claude-design` MCP `read_file` for each
 path; keep the original filenames (with spaces) so the cross-links between Marketing → Dashboard resolve.
 
 ## License: reconciled to AGPL-3.0
@@ -69,5 +69,5 @@ The design originally said **"MIT licensed"** in seven places — Marketing (her
 feature card, Pricing header, FAQ answer, footer), Dark (hero trust item), and Exploration (hero trust
 item). On 2026-06-21 all seven were corrected to **AGPL-3.0**, matching the locked decision
 (`docs/specs/2026-06-21-product-spec.md` §6, repo `README.md`) — both in these local files and pushed
-back to the Claude Design source via the `claude_design` MCP, so the design stays the source of truth.
+back to the Claude Design source via the `claude-design` MCP, so the design stays the source of truth.
 (Dashboard never referenced a license.)

@@ -19,7 +19,7 @@ When reporting, please include:
 
 - A description of the issue and its impact.
 - Steps to reproduce (a proof of concept if you have one).
-- Affected component (tracking script, collector, dashboard/auth, cron, deploy).
+- Affected component (tracking script, collector, dashboard/auth, deploy).
 - Any suggested remediation.
 
 We will acknowledge your report, keep you updated on progress, and credit you when a
@@ -49,9 +49,9 @@ Understanding the design helps you report meaningful issues.
   HMAC-signed cookies** (`AUTH_COOKIE_SECRET`) — there is no server-side session
   store to leak.
 - **Cookieless visitor identity.** Visitor IDs are a daily-salted HMAC over
-  `(salt, ip, ua, site_id)`. The raw IP is never persisted, and the salt rotates at
-  UTC midnight (previous day deleted), preventing cross-day correlation. See
-  [docs/privacy.md](./docs/privacy.md).
+  `(salt, ip, ua, site_id)`. The raw IP is never persisted, and each day's salt
+  expires via KV TTL anchored to that day's boundary (~1 h after UTC midnight),
+  preventing cross-day correlation. See [docs/privacy.md](./docs/privacy.md).
 - **Content Security Policy.** Every response carries a CSP nonce with
   `'strict-dynamic'`; there are no inline scripts without a nonce. Authenticated
   pages use a per-request nonce; cached public `/share` pages use a per-cache-entry
@@ -75,7 +75,8 @@ Understanding the design helps you report meaningful issues.
 ## Scope
 
 In scope: the Worker code in this repository — the tracking script, the collector,
-the dashboard and its authentication, the cron rollup, and the deploy path.
+the dashboard and its authentication, the `SiteLive` Durable Object rollup, and the
+deploy path.
 
 Out of scope: the Cloudflare platform itself, and misconfiguration of your own
 Cloudflare account (e.g. leaked API tokens, weak passwords, an over-broad origin

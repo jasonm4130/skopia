@@ -18,6 +18,11 @@ from `wrangler.jsonc`:
 **The button will prompt you for four secrets** (declared in `package.json`
 `cloudflare.bindings`). Generate them before you click:
 
+> **Note:** `CF_ACCOUNT_ID` and `WAE_API_TOKEN` are prompted for by the Deploy wizard but
+> currently unused by any code path — every dashboard chart reads from D1, not Analytics
+> Engine (see [After deploy](#after-deploy) below). Set them anyway; nothing breaks if you
+> do, and they may be wired up again pending a product decision.
+
 ### Generating your secrets
 
 **`AUTH_COOKIE_SECRET`** — signs the dashboard session cookie.
@@ -35,14 +40,13 @@ sites' hashes are comparable even if hosted by the same operator.
 openssl rand -hex 32
 ```
 
-**`CF_ACCOUNT_ID`** — your Cloudflare account ID, needed for Analytics Engine queries.
+**`CF_ACCOUNT_ID`** — your Cloudflare account ID.
 
 1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages**.
 2. Your Account ID appears in the right-hand sidebar.
 
-**`WAE_API_TOKEN`** — lets the dashboard query your Analytics Engine data. This is the one
-secret you cannot generate with `openssl` — it must be minted in the Cloudflare API-token
-UI:
+**`WAE_API_TOKEN`** — an Analytics Engine read token. This is the one secret you cannot
+generate with `openssl` — it must be minted in the Cloudflare API-token UI:
 
 1. Go to **My Profile → API Tokens → Create Token**.
 2. Choose **Create Custom Token**.
@@ -66,34 +70,9 @@ clone or a migration change.
 
 ### Generating your secrets (for CLI deploy)
 
-Before running `wrangler deploy`, set the four secrets as environment variables or in
-your local `.dev.vars` file (do not commit `.dev.vars`):
-
-**`AUTH_COOKIE_SECRET`** — signs the dashboard session cookie.
-
-```sh
-openssl rand -hex 32
-```
-
-**`IDENTITY_HMAC_SECRET`** — hashes visitor identities for cookieless analytics.
-
-```sh
-openssl rand -hex 32
-```
-
-**`CF_ACCOUNT_ID`** — your Cloudflare account ID.
-
-1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **Workers & Pages**.
-2. Your Account ID appears in the right-hand sidebar.
-
-**`WAE_API_TOKEN`** — lets the dashboard query your Analytics Engine data.
-
-1. Go to **My Profile → API Tokens → Create Token**.
-2. Choose **Create Custom Token**.
-3. Under *Permissions*, add: **Account → Account Analytics → Read**.
-4. Under *Account Resources*, select your account.
-5. Click **Continue to summary → Create Token**.
-6. Copy the token — it is shown only once.
+Same four secrets as [above](#generating-your-secrets), generated the same way. For CLI
+deploy, set them as environment variables or in your local `.dev.vars` file (do not commit
+`.dev.vars`) instead of pasting into the Deploy wizard.
 
 ### Local development
 
@@ -109,8 +88,9 @@ pnpm dev
 
 ## After deploy
 
-- **Dashboard shows data** once `WAE_API_TOKEN` is set — it's what powers the Analytics
-  Engine queries behind every chart.
+- **Dashboard shows data** once events start arriving — every chart reads from D1
+  (`rollup_daily`), written by a per-site Durable Object on each event. `CF_ACCOUNT_ID`
+  and `WAE_API_TOKEN` are not part of that path (see the note above).
 - **Ingest works** once `IDENTITY_HMAC_SECRET` is set — without it the collector returns
   `503` rather than signing with an undefined key.
 - On first dashboard load, a setup screen at `/setup` prompts you to create your owner
@@ -123,6 +103,20 @@ pnpm dev
 Now that Skopia is deployed to your Cloudflare account, add the tracking snippet to your
 site. Replace `skopia.<your-subdomain>.workers.dev` with your Worker's actual
 URL (or your custom domain if you bound one).
+
+### Register a site first
+
+A fresh deploy does not seed any sites — the tracking snippet below will 404 until you
+register one. There is no site-management UI in the MVP, so register directly in D1:
+
+```sh
+wrangler d1 execute skopia --remote \
+  --command "INSERT INTO sites (id,name,domain) VALUES ('default','My Site','example.com')"
+```
+
+Use whatever `id` you like as the value for `data-site` below — this guide uses `default`
+throughout. If you skip this step, `/app` shows the same reminder: *"No sites tracked
+yet. Register one with `wrangler d1 execute ...`, then reload."*
 
 ## 1. Drop in the snippet
 
@@ -138,7 +132,7 @@ Add this to the `<head>` (or before `</body>`) of every page you want to track:
 | Attribute | Required | Meaning |
 |-----------|----------|---------|
 | `src` | yes | The tracking script, served by your Worker at `/skopia.js`. |
-| `data-site` | yes | The site ID. A fresh deploy seeds one site with ID `default`. If this attribute is missing, the script does nothing. |
+| `data-site` | yes | The site ID you registered in the previous step. If this attribute is missing, the script does nothing. |
 | `data-endpoint` | usually | Where pageview/event beacons are sent. **Defaults to `/e` relative to the page**, so you almost always need to set it explicitly — see the gotcha below. |
 
 ### The `data-endpoint` gotcha (read this)
@@ -158,10 +152,11 @@ The beacon is `POST`ed to `data-endpoint`. If you omit it, it defaults to `/e`
 1. Load a tracked page in your browser.
 2. Open DevTools → **Network**, filter for `e`. You should see a `POST` to your
    endpoint returning **204 No Content**.
-3. Open `https://skopia.<your-subdomain>.workers.dev/live` — your visit should show
-   up within a second or two.
-4. The aggregated dashboard at `/app` fills in as the cron rollup runs (every 5
-   minutes); the first finalized numbers appear shortly after.
+3. Log into your dashboard and open `/app` — under **Active pages right now**, your
+   visit should show up within a second or two. (`/live` itself isn't a page to open
+   directly — it's an authenticated WebSocket endpoint the dashboard connects to.)
+4. The stat cards on `/app` update immediately too: a per-site Durable Object writes
+   aggregates to D1 on every event, so there's no batch delay to wait out.
 
 If the `POST` returns:
 
@@ -172,8 +167,8 @@ If the `POST` returns:
 
 ## 3. Lock down which origins can send data (optional)
 
-The seeded `default` site has an **empty allowlist**, which means it is *open* — it
-accepts beacons from any origin. That is convenient for getting started. To
+A newly registered site has an **empty allowlist** by default, which means it is
+*open* — it accepts beacons from any origin. That is convenient for getting started. To
 restrict collection to your own domain(s), set the origin allowlist directly in D1
 (there is no site-management UI in the MVP):
 
@@ -189,8 +184,8 @@ rejected with 403.
 
 ## 4. Track more than one site
 
-The MVP ships with a single seeded site. To add another, insert a row into D1 and
-use its ID as `data-site`:
+Each site is registered explicitly (see [Register a site](#register-a-site-first)
+above). To add another, insert a row into D1 and use its ID as `data-site`:
 
 ```sh
 wrangler d1 execute skopia --remote \
