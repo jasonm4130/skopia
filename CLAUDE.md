@@ -42,35 +42,13 @@ does not pick the feature roadmap. Cross-lane conflicts are resolved by writing 
 
 ---
 
-## Behavioral defaults (Karpathy 4)
-
-These are the operating rules for every change in this repo.
-
-1. **Think before coding (and before answering).** State assumptions out loud. If multiple
-   interpretations exist, ask only when guessing wrong is costly (irreversible action, lost
-   work, wrong direction on multi-step work); otherwise state your interpretation and
-   proceed. Ask at most one question — never a list.
-
-2. **Simplicity first.** No features beyond what the spec asks for. No abstraction for
-   single-use code. We are building the *opposite* of bloated analytics — that discipline
-   applies to our own code too. If you write 200 lines and it could be 50, rewrite it. The
-   tracking script in particular is sacred: every byte ships to every visitor.
-
-3. **Surgical changes.** Touch only what you must. Don't "improve" adjacent code. Match
-   existing style. Every changed line should trace to a requirement or an ADR.
-
-4. **Goal-driven execution.** Define the success criterion, then loop until verified.
-   "Fix the bug" becomes "write a test that reproduces it, then make it pass." State
-   problems *before* executing a flawed plan. Confidence proportional to evidence.
-
-## Verification before claiming complete
-
-Before saying work is done: run typecheck/tests/lint, read the actual output, and quote a
-specific success line. "Looks good" without verification is a fail. If a check can't run in
-the current environment, say so explicitly rather than implying success.
-
 ## Engineering conventions (provisional — tech lead finalizes)
 
+- **Bloat discipline is the product.** We are building the *opposite* of bloated analytics,
+  so it applies to our own code first. The tracking script in particular is sacred: every
+  byte ships to every visitor.
+- **Every changed line traces to a requirement or an ADR.** Cross-lane conflicts get written
+  down in `docs/decisions/` rather than settled in a diff.
 - **Language:** TypeScript everywhere. Strict mode.
 - **Runtime:** Cloudflare Workers. Config via `wrangler.jsonc`.
 - **Docs that bind:** Cloudflare moves fast. Bias to retrieving *current* Cloudflare docs
