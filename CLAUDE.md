@@ -52,7 +52,7 @@ does not pick the feature roadmap. Cross-lane conflicts are resolved by writing 
 - **Language:** TypeScript everywhere. Strict mode.
 - **Runtime:** Cloudflare Workers. Config via `wrangler.jsonc`.
 - **Docs that bind:** Cloudflare moves fast. Bias to retrieving *current* Cloudflare docs
-  (via the `cloudflare` skills / Cloudflare MCP / context7) over pre-trained knowledge.
+  (via the Cloudflare docs MCP, `cloudflare-docs`) over pre-trained knowledge.
   When in doubt about a binding, limit, or pricing detail, look it up.
 - **Tests:** Vitest with the Workers pool (`@cloudflare/vitest-pool-workers`) for Worker
   code. TDD for non-trivial logic.
@@ -72,13 +72,12 @@ docs/decisions/        ADRs — one decision per file, dated, with context + con
 
 ## Related repositories
 
-- **`../skopia-www`** — the marketing site (**skopia.dev**). Its own repo: a **static Astro**
+- **`skopia-www`** (`jasonm4130/skopia-www`) — the marketing site (**skopia.dev**). Its own repo: a **static Astro**
   site deployed to **Cloudflare Workers Static Assets** (ADR-0007), **not** a workspace member
   of this repo (so the one-click Deploy button stays single-package). Design tokens flow
   one-way: `src/shared/tokens.css` here is the **source of truth**, copied into
   `skopia-www/public/tokens.css` (ADR-0009) — edit tokens here, then re-copy. The product
   Worker serves the app/collector (`app.skopia.dev`); marketing owns the apex (`skopia.dev`).
-  Local cross-repo file access is wired via `.claude/settings.local.json` (gitignored).
 
 ## Workflow
 
