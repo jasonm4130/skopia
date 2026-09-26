@@ -173,6 +173,53 @@ describe("/setup", () => {
     expect(text).toContain("Welcome to Skopia");
     expect(text).toContain('action="/setup"');
   });
+
+  // getOwner() is mocked (module-level), so it can't see a row another
+  // concurrent request just inserted — the race this closes is exactly that
+  // TOCTOU gap. Seed a real owner row directly and drive POST /setup (which
+  // hits the real D1 binding) with a second, different email to prove the
+  // conditional INSERT — not the getOwner() check — is what stops it.
+  it("POST /setup creates no second owner row when one already exists", async () => {
+    vi.mocked(queries.getOwner).mockResolvedValue(null);
+    await env.DB.prepare(
+      "INSERT INTO users (email, pw_hash, role, created_at) VALUES (?, 'x', 'owner', unixepoch())",
+    )
+      .bind("race-first-owner@test.dev")
+      .run();
+
+    try {
+      const form = new URLSearchParams({
+        email: "race-second-owner@test.dev",
+        password: "password123",
+        confirm: "password123",
+      });
+      const { res } = await fetch_(
+        req("/setup", {
+          method: "POST",
+          body: form.toString(),
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("/login");
+
+      const owners = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'owner' AND email LIKE 'race-%'",
+      ).first<{ n: number }>();
+      expect(owners?.n).toBe(1);
+
+      const secondOwner = await env.DB.prepare("SELECT id FROM users WHERE email = ?")
+        .bind("race-second-owner@test.dev")
+        .first();
+      expect(secondOwner).toBeNull();
+    } finally {
+      // This suite's D1 state persists across tests in this file (real D1
+      // binding, no per-test reset) — clean up so a later test relying on
+      // "no owner exists yet" (e.g. PBKDF2 iteration cap's /setup test) isn't
+      // broken by this test's seeded owner row.
+      await env.DB.prepare("DELETE FROM users WHERE email LIKE 'race-%'").run();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

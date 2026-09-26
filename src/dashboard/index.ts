@@ -1196,12 +1196,25 @@ dashboard.post("/setup", async (c) => {
   }
 
   const pwHash = await hashPassword(password);
-  await c.env.DB.prepare(
-    "INSERT INTO users (email, pw_hash, role, created_at) VALUES (?, ?, 'owner', unixepoch())",
+  // Race guard: two concurrent first-run POSTs both pass the getOwner() check
+  // above before either INSERTs. A single conditional statement (SELECT ...
+  // WHERE NOT EXISTS) makes "is there already an owner" and "insert the
+  // owner" atomic in D1, instead of two round trips a second request can
+  // interleave between. `meta.changes === 0` means another request already
+  // won the race — behave exactly like the getOwner() check above.
+  const result = await c.env.DB.prepare(
+    `INSERT INTO users (email, pw_hash, role, created_at)
+     SELECT ?, ?, 'owner', unixepoch()
+     WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'owner')`,
   )
     .bind(email, pwHash)
     .run();
 
+  if (result.meta.changes === 0) {
+    // Another request already won the race and created the owner — same
+    // response as the getOwner() check above.
+    return c.redirect("/login");
+  }
   return c.redirect("/login");
 });
 
