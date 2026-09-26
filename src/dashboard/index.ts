@@ -1884,6 +1884,11 @@ dashboard.get("/app", async (c) => {
 
   const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) {
+    // A bad/unknown ?site= among existing sites is not "no sites tracked" —
+    // fall back to the default site (consistent with every other /app/*
+    // view, which does `if (!site) return c.redirect("/app")`) instead of
+    // showing the empty-state copy while real sites exist.
+    if (sites.length > 0) return c.redirect("/app");
     return c.html(
       htmlDoc(
         "No sites",

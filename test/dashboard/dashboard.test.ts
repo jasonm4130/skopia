@@ -558,6 +558,16 @@ describe("site switcher", () => {
     expect(text).toContain('<option value="site-002" selected>other.dev</option>');
     expect(text).toContain('<option value="site-001">test.dev</option>');
   });
+
+  it("redirects to /app (not the empty state) when ?site= names an unknown site but sites exist", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/app?site=no-such-site", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/app");
+  });
 });
 
 describe("range preservation across nav", () => {
