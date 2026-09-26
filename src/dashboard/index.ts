@@ -1867,6 +1867,23 @@ dashboard.get("/live", async (c) => {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
 
+  // CSRF/cross-site-WebSocket guard: the session cookie alone authorizes this
+  // upgrade (cookies ride along with any cross-site request), so a page on
+  // another origin could otherwise open this socket using the dashboard
+  // owner's browser. Require a same-origin `Origin` header, same as a
+  // same-site cookie policy would enforce for a regular request.
+  const originHeader = c.req.header("Origin");
+  if (!originHeader) {
+    return new Response("Missing Origin", { status: 403 });
+  }
+  try {
+    if (new URL(originHeader).host !== new URL(c.req.url).host) {
+      return new Response("Cross-origin WebSocket rejected", { status: 403 });
+    }
+  } catch {
+    return new Response("Invalid Origin", { status: 403 });
+  }
+
   const id = c.env.SITE_LIVE.idFromName(siteId);
   const stub = c.env.SITE_LIVE.get(id);
 

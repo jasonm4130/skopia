@@ -792,6 +792,44 @@ describe("/live", () => {
     );
     expect(res.status).toBe(426);
   });
+
+  it("rejects a WebSocket upgrade with a cross-site Origin with 403", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: {
+          Cookie: `skopia_session=${cookieVal}`,
+          Upgrade: "websocket",
+          Origin: "https://evil.example",
+        },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects a WebSocket upgrade with no Origin header with 403", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: { Cookie: `skopia_session=${cookieVal}`, Upgrade: "websocket" },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a WebSocket upgrade with a same-origin Origin (not 403)", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: {
+          Cookie: `skopia_session=${cookieVal}`,
+          Upgrade: "websocket",
+          Origin: "https://skopia.test",
+        },
+      }),
+    );
+    expect(res.status).not.toBe(403);
+  });
 });
 
 // ---------------------------------------------------------------------------
