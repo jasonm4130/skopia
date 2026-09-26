@@ -342,8 +342,8 @@ describe("handleCollect — WAE slot mapping", () => {
 
     // Blob1 = vid (16-hex)
     expect(dp.blobs[0]).toMatch(/^[0-9a-f]{16}$/);
-    // Blob2 = pathname
-    expect(dp.blobs[1]).toContain("/test-page");
+    // Blob2 = pathname (normalized: query string stripped — privacy, can carry PII)
+    expect(dp.blobs[1]).toBe("/test-page");
     // Blob3 = referrer host
     expect(dp.blobs[2]).toBe("www.google.com");
     // Blob4 = utm_source
@@ -362,8 +362,8 @@ describe("handleCollect — WAE slot mapping", () => {
     expect(dp.blobs[9]).toBe("Windows");
     // Blob11 = event_name (empty for pageview)
     expect(dp.blobs[10]).toBe("");
-    // Blob12 = entry_path
-    expect(dp.blobs[11]).toContain("/test-page");
+    // Blob12 = entry_path (also query-stripped)
+    expect(dp.blobs[11]).toBe("/test-page");
     // Blob13 = props_json (empty for pageview)
     expect(dp.blobs[12]).toBe("");
 
@@ -407,6 +407,36 @@ describe("handleCollect — WAE slot mapping", () => {
     expect(dp.blobs[12]).toBe(JSON.stringify({ plan: "pro" }));
 
     vi.restoreAllMocks();
+  });
+
+  it("strips the query string from the DO-stored path (privacy: query can carry PII)", async () => {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+    )
+      .bind("query-path-site", "Query Path Site", "querypath.example", "")
+      .run();
+
+    const ctx = createExecutionContext();
+    await handleCollect(
+      makeBeaconRequest(
+        { t: "pv", s: "query-path-site", p: "/test-page?utm_source=google&session=abc123" },
+        { ip: "203.0.113.60" },
+      ),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    const stub = env.SITE_LIVE.get(env.SITE_LIVE.idFromName("query-path-site"));
+    const { runDurableObjectAlarm } = await import("cloudflare:test");
+    await runDurableObjectAlarm(stub);
+
+    const row = await env.DB.prepare(
+      "SELECT dim_value FROM rollup_daily WHERE site_id=? AND dimension='page'",
+    )
+      .bind("query-path-site")
+      .first<{ dim_value: string }>();
+    expect(row?.dim_value).toBe("/test-page");
   });
 });
 
