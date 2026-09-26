@@ -212,7 +212,14 @@ export async function handleCollect(
     if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
       return new Response(null, { status: 413, headers: origin ? corsHeaders(origin) : {} });
     }
-    beacon = JSON.parse(text) as Beacon;
+    const parsed: unknown = JSON.parse(text);
+    // `JSON.parse` accepts `null`, arrays, and primitives too — none of those
+    // are a valid beacon, and reading `.s` off them below would throw outside
+    // this try, escaping as Hono's default 500 (no CORS headers).
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
+    }
+    beacon = parsed as Beacon;
   } catch {
     return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
   }

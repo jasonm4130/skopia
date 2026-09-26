@@ -139,6 +139,44 @@ describe("handleCollect — validation", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a JSON `null` body with 400 (not a 500 outside try/catch)", async () => {
+    const req = new Request("https://skopia.test/e", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://example.com" },
+      body: "null",
+    });
+    Object.defineProperty(req, "cf", { value: {}, writable: false });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(400);
+    // Same CORS treatment as other malformed-body rejections.
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+  });
+
+  it("rejects a JSON array body with 400", async () => {
+    const req = new Request("https://skopia.test/e", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "[1,2,3]",
+    });
+    Object.defineProperty(req, "cf", { value: {}, writable: false });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a JSON primitive body with 400", async () => {
+    const req = new Request("https://skopia.test/e", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '"just a string"',
+    });
+    Object.defineProperty(req, "cf", { value: {}, writable: false });
+    const ctx = createExecutionContext();
+    const res = await handleCollect(req, env, ctx);
+    expect(res.status).toBe(400);
+  });
+
   it("rejects unknown site_id with 404", async () => {
     const req = makeBeaconRequest(
       { t: "pv", s: "no-such-site", p: "/" },
