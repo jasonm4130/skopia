@@ -194,6 +194,22 @@ describe("/login", () => {
     expect(res.headers.get("location")).toBe("/setup");
   });
 
+  // A raw '%' in an unrelated cookie value is not a valid URI escape;
+  // decodeURIComponent throws URIError and must not 500 the request.
+  it("GET /login with a malformed cookie ('%') does not 500", async () => {
+    const { res } = await fetch_(req("/login", { headers: { Cookie: "other=100%" } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("an authenticated request still authenticates when another cookie is malformed", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/app", { headers: { Cookie: `x=100%; skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("POST /login with wrong password returns 401 and error message", async () => {
     const form = new URLSearchParams({ email: "owner@test.dev", password: "wrongpassword" });
     const { res, text } = await fetch_(

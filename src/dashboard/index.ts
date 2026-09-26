@@ -132,6 +132,15 @@ async function verifyCookie(value: string, secret: string): Promise<number | nul
   return valid ? userId : null;
 }
 
+/** decodeURIComponent throws URIError on a lone/invalid '%' escape — never let one bad cookie 500 the request. */
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseCookies(header: string | null): Record<string, string> {
   if (!header) return {};
   return Object.fromEntries(
@@ -139,7 +148,7 @@ function parseCookies(header: string | null): Record<string, string> {
       const eq = c.indexOf("=");
       return eq === -1
         ? [c.trim(), ""]
-        : [c.slice(0, eq).trim(), decodeURIComponent(c.slice(eq + 1).trim())];
+        : [c.slice(0, eq).trim(), safeDecodeURIComponent(c.slice(eq + 1).trim())];
     }),
   );
 }
