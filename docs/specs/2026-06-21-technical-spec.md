@@ -83,6 +83,8 @@ or the $5/mo Workers Paid base**.
                      no-JS mode = collector reads request headers, no client script.
 ```
 
+> Superseded in part by ADR-0012: `/public/<token>` above was replaced by `/share/:token`.
+
 ---
 
 ## 2. Collection layer (client script + transport)
@@ -309,6 +311,7 @@ is WAE+D1), so the DO uses in-memory state only — **no SQLite storage cost** i
   dashboard; Hono is the simplicity-first pick.
 - **Public/shareable dashboards** = the same SSR views gated by a per-site `public_token` route
   (`/public/<token>`), read-only, no auth. Cheap because the read path is already per-site.
+  (Superseded by ADR-0012: shipped as `/share/:token`, not `/public/:token`.)
 
 ### 7.2 Auth (ADR-0005, answers PM Q5)
 

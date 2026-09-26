@@ -173,6 +173,53 @@ describe("/setup", () => {
     expect(text).toContain("Welcome to Skopia");
     expect(text).toContain('action="/setup"');
   });
+
+  // getOwner() is mocked (module-level), so it can't see a row another
+  // concurrent request just inserted — the race this closes is exactly that
+  // TOCTOU gap. Seed a real owner row directly and drive POST /setup (which
+  // hits the real D1 binding) with a second, different email to prove the
+  // conditional INSERT — not the getOwner() check — is what stops it.
+  it("POST /setup creates no second owner row when one already exists", async () => {
+    vi.mocked(queries.getOwner).mockResolvedValue(null);
+    await env.DB.prepare(
+      "INSERT INTO users (email, pw_hash, role, created_at) VALUES (?, 'x', 'owner', unixepoch())",
+    )
+      .bind("race-first-owner@test.dev")
+      .run();
+
+    try {
+      const form = new URLSearchParams({
+        email: "race-second-owner@test.dev",
+        password: "password123",
+        confirm: "password123",
+      });
+      const { res } = await fetch_(
+        req("/setup", {
+          method: "POST",
+          body: form.toString(),
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("/login");
+
+      const owners = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'owner' AND email LIKE 'race-%'",
+      ).first<{ n: number }>();
+      expect(owners?.n).toBe(1);
+
+      const secondOwner = await env.DB.prepare("SELECT id FROM users WHERE email = ?")
+        .bind("race-second-owner@test.dev")
+        .first();
+      expect(secondOwner).toBeNull();
+    } finally {
+      // This suite's D1 state persists across tests in this file (real D1
+      // binding, no per-test reset) — clean up so a later test relying on
+      // "no owner exists yet" (e.g. PBKDF2 iteration cap's /setup test) isn't
+      // broken by this test's seeded owner row.
+      await env.DB.prepare("DELETE FROM users WHERE email LIKE 'race-%'").run();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -192,6 +239,22 @@ describe("/login", () => {
     const { res } = await fetch_(req("/login"));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/setup");
+  });
+
+  // A raw '%' in an unrelated cookie value is not a valid URI escape;
+  // decodeURIComponent throws URIError and must not 500 the request.
+  it("GET /login with a malformed cookie ('%') does not 500", async () => {
+    const { res } = await fetch_(req("/login", { headers: { Cookie: "other=100%" } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("an authenticated request still authenticates when another cookie is malformed", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/app", { headers: { Cookie: `x=100%; skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(200);
   });
 
   it("POST /login with wrong password returns 401 and error message", async () => {
@@ -432,6 +495,27 @@ describe("stat-card labels", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sources breakdown table: Pageviews column + "% of views" header
+//
+// The table paired a "Visitors" count with a "Share" column computed from
+// pageviews, not visitors — e.g. "(direct) 8 visitors 48%" next to
+// "localhost 1 visitor 41%" reads as if 48% of visitors, when it's 48% of
+// pageviews. Fix: show Pageviews alongside Share, and label it "% of views".
+// ---------------------------------------------------------------------------
+
+describe("/app/sources breakdown table", () => {
+  it("shows a Pageviews column and labels Share as '% of views'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain(">Pageviews<");
+    expect(text).toContain("% of views");
+    expect(text).not.toContain(">Share<");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CSP nonce on inline scripts (Task 4)
 // ---------------------------------------------------------------------------
 
@@ -520,6 +604,16 @@ describe("site switcher", () => {
     expect(res.status).toBe(200);
     expect(text).toContain('<option value="site-002" selected>other.dev</option>');
     expect(text).toContain('<option value="site-001">test.dev</option>');
+  });
+
+  it("redirects to /app (not the empty state) when ?site= names an unknown site but sites exist", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/app?site=no-such-site", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/app");
   });
 });
 
@@ -697,6 +791,44 @@ describe("/live", () => {
       }),
     );
     expect(res.status).toBe(426);
+  });
+
+  it("rejects a WebSocket upgrade with a cross-site Origin with 403", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: {
+          Cookie: `skopia_session=${cookieVal}`,
+          Upgrade: "websocket",
+          Origin: "https://evil.example",
+        },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects a WebSocket upgrade with no Origin header with 403", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: { Cookie: `skopia_session=${cookieVal}`, Upgrade: "websocket" },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a WebSocket upgrade with a same-origin Origin (not 403)", async () => {
+    const cookieVal = await authedCookie();
+    const { res } = await fetch_(
+      req("/live?site=site-001", {
+        headers: {
+          Cookie: `skopia_session=${cookieVal}`,
+          Upgrade: "websocket",
+          Origin: "https://skopia.test",
+        },
+      }),
+    );
+    expect(res.status).not.toBe(403);
   });
 });
 

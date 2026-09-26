@@ -7,7 +7,7 @@
  *   (b) jsVectorMap 1.6.0 css/js + maps/world.js → public/vendor/jsvectormap@1.6.0/
  *
  * Commit the fetched files (simplest for the Deploy button; a version bump is a
- * deliberate PR). Run: `npm run fetch-vendor`.
+ * deliberate PR). Run: `pnpm fetch-vendor`.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -127,6 +127,6 @@ main().catch((err) => {
     /* ignore */
   }
   console.error(`fetch-vendor: FAILED to download assets — ${err.message}`);
-  console.error("fetch-vendor: assets MUST be fetched via `npm run fetch-vendor` before deploy.");
+  console.error("fetch-vendor: assets MUST be fetched via `pnpm fetch-vendor` before deploy.");
   process.exitCode = 1;
 });

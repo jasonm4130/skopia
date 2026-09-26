@@ -34,6 +34,16 @@ describe("parseRange", () => {
     expect(spanDays(parseRange(null))).toBe(30);
   });
 
+  // `ranges[param]` truthiness (a plain object) resolves inherited
+  // Object.prototype members instead of `undefined` — falls back to 30d
+  // instead of throwing on `.from()`.
+  it("falls back to 30d for Object.prototype property names, not a 500", () => {
+    for (const param of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      expect(parseRange(param).key).toBe("30d");
+      expect(spanDays(parseRange(param))).toBe(30);
+    }
+  });
+
   it("'to' is today (UTC)", () => {
     const today = new Date().toISOString().slice(0, 10);
     expect(parseRange("7d").to).toBe(today);

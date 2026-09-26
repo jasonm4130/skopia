@@ -161,6 +161,21 @@ function truncate(value: string, maxChars: number): string {
   return value.length > maxChars ? value.slice(0, maxChars) : value;
 }
 
+/**
+ * Strip the query string from `beacon.p` for anything that gets stored or
+ * rolled up (blob2, blob12, DO `path`). `p` is `location.pathname + location.search`
+ * (privacy: the query is needed for UTM parsing but must never be persisted as
+ * the page path — it can carry PII). Falls back to the input unchanged if it
+ * doesn't parse as a path.
+ */
+function stripQuery(pathWithQuery: string): string {
+  try {
+    return new URL(pathWithQuery, "https://skopia.invalid").pathname;
+  } catch {
+    return pathWithQuery;
+  }
+}
+
 /** `w` must be a finite, in-range number, or it's omitted entirely (no NaN reaches WAE). */
 function validScreenWidth(w: unknown): number | undefined {
   return typeof w === "number" && Number.isFinite(w) && w > 0 && w <= MAX_SCREEN_WIDTH
@@ -197,7 +212,14 @@ export async function handleCollect(
     if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
       return new Response(null, { status: 413, headers: origin ? corsHeaders(origin) : {} });
     }
-    beacon = JSON.parse(text) as Beacon;
+    const parsed: unknown = JSON.parse(text);
+    // `JSON.parse` accepts `null`, arrays, and primitives too — none of those
+    // are a valid beacon, and reading `.s` off them below would throw outside
+    // this try, escaping as Hono's default 500 (no CORS headers).
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
+    }
+    beacon = parsed as Beacon;
   } catch {
     return new Response(null, { status: 400, headers: origin ? corsHeaders(origin) : {} });
   }
@@ -223,7 +245,11 @@ export async function handleCollect(
 
   // ---------- 3b. Bound client-supplied fields (truncate, don't drop; Task 8) ----------
   const isEvent = beacon.t === "event";
+  // `pathname` keeps the query string (UTM parsing needs it); `path` is the
+  // stored/rolled-up value — query-string-free, since query strings can carry
+  // PII (session ids, emails, tokens) and must never land in WAE or the DO.
   const pathname = truncate(beacon.p, MAX_PATH_CHARS);
+  const path = truncate(stripQuery(pathname), MAX_PATH_CHARS);
   const referrerRaw =
     typeof beacon.r === "string" ? truncate(beacon.r, MAX_REFERRER_CHARS) : undefined;
   const screenWidth = validScreenWidth(beacon.w);
@@ -323,7 +349,7 @@ export async function handleCollect(
     const waeEvent: WaeEvent = {
       siteId,
       vid,
-      pathname,
+      pathname: path,
       referrerHost,
       utmSource: utm.source,
       utmMedium: utm.medium,
@@ -333,7 +359,7 @@ export async function handleCollect(
       browser: uaInfo.browser,
       os: uaInfo.os,
       eventName,
-      entryPath: pathname, // MVP: entry path = current path (no session tracking)
+      entryPath: path, // MVP: entry path = current path (no session tracking)
       propsJson,
       count: 1,
       isPageview: isPageview as 0 | 1,
@@ -352,7 +378,7 @@ export async function handleCollect(
       siteId,
       vid,
       isPageview,
-      path: pathname,
+      path,
       referrer: referrerHost,
       utmSource: utm.source,
       utmMedium: utm.medium,

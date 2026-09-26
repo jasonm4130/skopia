@@ -10,7 +10,7 @@ let src;
 try {
   src = readFileSync(FILE, "utf8");
 } catch {
-  console.error(`FAIL: ${FILE} not found — run "npm run build:script" first.`);
+  console.error(`FAIL: ${FILE} not found — run "pnpm build:script" first.`);
   process.exit(1);
 }
 

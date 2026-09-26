@@ -132,6 +132,15 @@ async function verifyCookie(value: string, secret: string): Promise<number | nul
   return valid ? userId : null;
 }
 
+/** decodeURIComponent throws URIError on a lone/invalid '%' escape — never let one bad cookie 500 the request. */
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseCookies(header: string | null): Record<string, string> {
   if (!header) return {};
   return Object.fromEntries(
@@ -139,7 +148,7 @@ function parseCookies(header: string | null): Record<string, string> {
       const eq = c.indexOf("=");
       return eq === -1
         ? [c.trim(), ""]
-        : [c.slice(0, eq).trim(), decodeURIComponent(c.slice(eq + 1).trim())];
+        : [c.slice(0, eq).trim(), safeDecodeURIComponent(c.slice(eq + 1).trim())];
     }),
   );
 }
@@ -279,7 +288,11 @@ export function parseRange(
     "30d": { from: () => daysAgo(29), label: "Last 30 days" },
     "90d": { from: () => daysAgo(89), label: "Last 90 days" },
   };
-  const key = param && ranges[param] ? param : "30d";
+  // Object.hasOwn, not `ranges[param]` truthiness — a plain object inherits
+  // from Object.prototype, so ?range=toString / constructor / __proto__ /
+  // hasOwnProperty resolves to an inherited function (truthy) instead of
+  // `undefined`, and `.from()` on it throws.
+  const key = param && Object.hasOwn(ranges, param) ? param : "30d";
   const selected = ranges[key] ?? ranges["30d"]!;
   const to = todayUtc();
   const from = selected.from();
@@ -1183,12 +1196,25 @@ dashboard.post("/setup", async (c) => {
   }
 
   const pwHash = await hashPassword(password);
-  await c.env.DB.prepare(
-    "INSERT INTO users (email, pw_hash, role, created_at) VALUES (?, ?, 'owner', unixepoch())",
+  // Race guard: two concurrent first-run POSTs both pass the getOwner() check
+  // above before either INSERTs. A single conditional statement (SELECT ...
+  // WHERE NOT EXISTS) makes "is there already an owner" and "insert the
+  // owner" atomic in D1, instead of two round trips a second request can
+  // interleave between. `meta.changes === 0` means another request already
+  // won the race — behave exactly like the getOwner() check above.
+  const result = await c.env.DB.prepare(
+    `INSERT INTO users (email, pw_hash, role, created_at)
+     SELECT ?, ?, 'owner', unixepoch()
+     WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'owner')`,
   )
     .bind(email, pwHash)
     .run();
 
+  if (result.meta.changes === 0) {
+    // Another request already won the race and created the owner — same
+    // response as the getOwner() check above.
+    return c.redirect("/login");
+  }
   return c.redirect("/login");
 });
 
@@ -1406,9 +1432,11 @@ function publicMobileTabbar(activeView: string, token: string, rangeKey: string)
  * Layout for the public /share/:token surface. Mirrors appLayout's shape
  * (sidebar + topbar + content) but strips everything that leaks the authed
  * app: no site switcher, no /app or /login hrefs, no live WebSocket client.
- * `onlineCount` renders the "online now" badge only when non-null — this
- * task always passes null; launch-readiness Task 2 wires the real count via
- * a server-side SITE_LIVE snapshot() read, never a public WebSocket.
+ * `onlineCount` renders the "online now" badge only when non-null. It is now
+ * a real best-effort count from a server-side `SITE_LIVE.snapshot()` read
+ * (never a public WebSocket), cached alongside the rendered page for up to
+ * `SHARE_CACHE_TTL_SECONDS` — a DO failure degrades to `null` (no badge),
+ * never a 500.
  */
 function publicLayout(
   activeView: string,
@@ -1689,7 +1717,8 @@ dashboard.get("/share/:token/sources", async (c) => {
       [
         { label: "Source", key: "label" },
         { label: "Visitors", key: "visitors" },
-        { label: "Share", key: "share" },
+        { label: "Pageviews", key: "pageviews" },
+        { label: "% of views", key: "share" },
       ],
       rows,
     );
@@ -1840,6 +1869,23 @@ dashboard.get("/live", async (c) => {
     return new Response("Expected WebSocket upgrade", { status: 426 });
   }
 
+  // CSRF/cross-site-WebSocket guard: the session cookie alone authorizes this
+  // upgrade (cookies ride along with any cross-site request), so a page on
+  // another origin could otherwise open this socket using the dashboard
+  // owner's browser. Require a same-origin `Origin` header, same as a
+  // same-site cookie policy would enforce for a regular request.
+  const originHeader = c.req.header("Origin");
+  if (!originHeader) {
+    return new Response("Missing Origin", { status: 403 });
+  }
+  try {
+    if (new URL(originHeader).host !== new URL(c.req.url).host) {
+      return new Response("Cross-origin WebSocket rejected", { status: 403 });
+    }
+  } catch {
+    return new Response("Invalid Origin", { status: 403 });
+  }
+
   const id = c.env.SITE_LIVE.idFromName(siteId);
   const stub = c.env.SITE_LIVE.get(id);
 
@@ -1870,6 +1916,11 @@ dashboard.get("/app", async (c) => {
 
   const { sites, site } = await resolveSites(c.env.DB, siteParam);
   if (!site) {
+    // A bad/unknown ?site= among existing sites is not "no sites tracked" —
+    // fall back to the default site (consistent with every other /app/*
+    // view, which does `if (!site) return c.redirect("/app")`) instead of
+    // showing the empty-state copy while real sites exist.
+    if (sites.length > 0) return c.redirect("/app");
     return c.html(
       htmlDoc(
         "No sites",
@@ -1976,7 +2027,8 @@ dashboard.get("/app/sources", async (c) => {
       [
         { label: "Source", key: "label" },
         { label: "Visitors", key: "visitors" },
-        { label: "Share", key: "share" },
+        { label: "Pageviews", key: "pageviews" },
+        { label: "% of views", key: "share" },
       ],
       rows,
     ) + liveScript(site.id, nonce);
