@@ -288,7 +288,11 @@ export function parseRange(
     "30d": { from: () => daysAgo(29), label: "Last 30 days" },
     "90d": { from: () => daysAgo(89), label: "Last 90 days" },
   };
-  const key = param && ranges[param] ? param : "30d";
+  // Object.hasOwn, not `ranges[param]` truthiness — a plain object inherits
+  // from Object.prototype, so ?range=toString / constructor / __proto__ /
+  // hasOwnProperty resolves to an inherited function (truthy) instead of
+  // `undefined`, and `.from()` on it throws.
+  const key = param && Object.hasOwn(ranges, param) ? param : "30d";
   const selected = ranges[key] ?? ranges["30d"]!;
   const to = todayUtc();
   const from = selected.from();
