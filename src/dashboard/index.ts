@@ -1432,9 +1432,11 @@ function publicMobileTabbar(activeView: string, token: string, rangeKey: string)
  * Layout for the public /share/:token surface. Mirrors appLayout's shape
  * (sidebar + topbar + content) but strips everything that leaks the authed
  * app: no site switcher, no /app or /login hrefs, no live WebSocket client.
- * `onlineCount` renders the "online now" badge only when non-null — this
- * task always passes null; launch-readiness Task 2 wires the real count via
- * a server-side SITE_LIVE snapshot() read, never a public WebSocket.
+ * `onlineCount` renders the "online now" badge only when non-null. It is now
+ * a real best-effort count from a server-side `SITE_LIVE.snapshot()` read
+ * (never a public WebSocket), cached alongside the rendered page for up to
+ * `SHARE_CACHE_TTL_SECONDS` — a DO failure degrades to `null` (no badge),
+ * never a 500.
  */
 function publicLayout(
   activeView: string,

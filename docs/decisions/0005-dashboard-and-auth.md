@@ -4,6 +4,8 @@
 - **Status:** accepted
 - **Owner:** cloudflare-tech-lead
 
+> Superseded in part by ADR-0012: `/public/:token` was replaced by `/share/:token`.
+
 ## Context
 
 We need to host the dashboard (owner view + per-site public/shareable read-only view) and protect

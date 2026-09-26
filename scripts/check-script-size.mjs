@@ -1,5 +1,5 @@
 // Fail the build if the tracking script exceeds the 2 KB gzipped budget.
-// Run after `npm run build:script` (emits dist/skopia.js). Spec §2 / CLAUDE.md.
+// Run after `pnpm build:script` (emits dist/skopia.js). Spec §2 / CLAUDE.md.
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
@@ -10,7 +10,7 @@ let raw;
 try {
   raw = readFileSync(FILE);
 } catch {
-  console.error(`FAIL: ${FILE} not found — run "npm run build:script" first.`);
+  console.error(`FAIL: ${FILE} not found — run "pnpm build:script" first.`);
   process.exit(1);
 }
 
