@@ -288,6 +288,13 @@ describe("GET /share/:token/{pages,sources,devices,campaigns,events}", () => {
     expect(nonceOf(res)).toBe(bodyNonceOf(text));
   });
 
+  it("sources: shows a Pageviews column and labels Share as '% of views'", async () => {
+    const { text } = await fetch_(req(`/share/${VALID_TOKEN}/sources`));
+    expect(text).toContain(">Pageviews<");
+    expect(text).toContain("% of views");
+    expect(text).not.toContain(">Share<");
+  });
+
   it("devices: 200 with device/browser/OS panels and matching nonce", async () => {
     const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}/devices`));
     expect(res.status).toBe(200);

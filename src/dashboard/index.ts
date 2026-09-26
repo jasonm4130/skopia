@@ -1698,7 +1698,8 @@ dashboard.get("/share/:token/sources", async (c) => {
       [
         { label: "Source", key: "label" },
         { label: "Visitors", key: "visitors" },
-        { label: "Share", key: "share" },
+        { label: "Pageviews", key: "pageviews" },
+        { label: "% of views", key: "share" },
       ],
       rows,
     );
@@ -1985,7 +1986,8 @@ dashboard.get("/app/sources", async (c) => {
       [
         { label: "Source", key: "label" },
         { label: "Visitors", key: "visitors" },
-        { label: "Share", key: "share" },
+        { label: "Pageviews", key: "pageviews" },
+        { label: "% of views", key: "share" },
       ],
       rows,
     ) + liveScript(site.id, nonce);

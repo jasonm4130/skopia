@@ -448,6 +448,27 @@ describe("stat-card labels", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sources breakdown table: Pageviews column + "% of views" header
+//
+// The table paired a "Visitors" count with a "Share" column computed from
+// pageviews, not visitors — e.g. "(direct) 8 visitors 48%" next to
+// "localhost 1 visitor 41%" reads as if 48% of visitors, when it's 48% of
+// pageviews. Fix: show Pageviews alongside Share, and label it "% of views".
+// ---------------------------------------------------------------------------
+
+describe("/app/sources breakdown table", () => {
+  it("shows a Pageviews column and labels Share as '% of views'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain(">Pageviews<");
+    expect(text).toContain("% of views");
+    expect(text).not.toContain(">Share<");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CSP nonce on inline scripts (Task 4)
 // ---------------------------------------------------------------------------
 
