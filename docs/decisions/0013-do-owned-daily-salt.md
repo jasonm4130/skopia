@@ -1,14 +1,13 @@
 # 0013 — The SiteLive DO owns each site's daily identity salt
 
 - **Date:** 2026-09-27
-- **Status:** accepted (option chosen by the human, 2026-09-27); not yet implemented. The
-  PITR finding in *Reviewer notes* (R1) weakens a privacy claim and should be acknowledged
-  before implementation.
+- **Status:** accepted (2026-09-27). The option, the PITR trade-off (§7) and the
+  WAE-on-failure rule (§4) were all decided by the human. Not yet implemented.
 - **Owner:** cloudflare-tech-lead
 - **Relates to:** amends ADR-0002 §Decision step 5 ("Daily salt in KV, rotated at UTC midnight
   by the Cron Worker"); builds on ADR-0010 (durable `SiteLive` state, single alarm slot) and
   ADR-0011 (cron retired; the DO is the only source of dashboard numbers). Touches
-  `docs/privacy.md` §2, ADR-0006 (Deploy-button provisioning list), `wrangler.jsonc`.
+  `docs/privacy.md` §2, `README.md`, ADR-0006 (Deploy-button provisioning list), `wrangler.jsonc`.
 - **Evidence base:** Cloudflare docs retrieved **2026-09-27** (URLs are inline with each claim);
   code read at `origin/main` `1f5f677`.
 
@@ -55,7 +54,9 @@ deletion property, which makes past-day ids unverifiable.
 
 **Each site's `SiteLive` DO (`idFromName(site_id)`, already one per site) generates, stores and
 expires that site's daily salt in its own SQLite storage. The collector fetches the salt from
-the DO once per isolate per (site, day) and memoizes it. The `SALT` KV namespace is removed.**
+the DO once per isolate per (site, day) and memoizes it. The `SALT` KV namespace is removed.
+Deleted salts stay recoverable for up to 30 days through Cloudflare PITR, and that is an
+accepted trade-off (§7).**
 
 ### 1. Storage and the get-or-create contract
 
@@ -140,10 +141,24 @@ helper, `armBy(t)`: `cur = await getAlarm(); if (cur === null || cur > t) await 
   - Alarm invocations count as DO requests (same page), which adds at most one salt-expiry
     alarm per site per day.
 
-### 4. Failure mode: drop, never fall back
+### 4. Failure mode: no vid and no DO delivery, but the WAE point is still written
 
-If `getSalt` fails, the collector **drops the event**. It does not fall back to KV or to any
-other salt, because mixing salts is exactly the bug this ADR fixes.
+If `getSalt` fails, the collector **still writes the WAE data point with `vid = ""`** (blob1
+empty) and **skips the DO `/event` delivery**. It never falls back to KV or to any other salt,
+because mixing salts is exactly the bug this ADR fixes.
+
+- **Why keep the WAE write.** Before this change, a DO failure lost only the rollup, and WAE
+  kept the raw event for a manual recompute (ADR-0011). Dropping the whole event would have
+  removed that backstop for exactly these events. With an empty vid they stay in WAE, so
+  pageviews and every other dimension can still be recomputed.
+- **Why the visitor count stays clean.** An empty vid is not a real visitor, and it never
+  reaches the DO's `seen` set. Any manual WAE recompute of visitors must exclude
+  `blob1 = ''`, because otherwise `COUNT(DISTINCT blob1)` would count them as one extra
+  visitor. No code queries blob1 today (checked at `1f5f677`).
+- **Why the DO delivery is skipped.** The DO's `seen` set needs a real vid. Sending the
+  pageview without one would split pageviews from visitors in `rollup_daily`. The consequence
+  is that the dashboard undercounts pageviews for those events until someone recomputes them
+  from WAE. That is the same bounded, accepted loss as ADR-0011's fire-and-forget delivery.
 
 - Cloudflare's guidance is that errors with `.retryable` "are suggested to be retried if
   requests to the Durable Object are idempotent", using a new stub for each attempt, and that
@@ -154,13 +169,15 @@ other salt, because mixing salts is exactly the bug this ADR fixes.
 - This failure only affects isolates that have not yet memoized the day's salt. Isolates that
   already have it keep working during a DO outage, and during such an outage the rollup
   delivery would fail anyway.
+- Log each salt failure so the rate can be monitored.
 
 ### 5. Beacon latency: identity work moves into `ctx.waitUntil`
 
 **Decision:** the collector responds 204 once the synchronous checks have passed: validation,
 bot drop, the cached site lookup, the origin check and the secret guard. The rest runs in one
 `ctx.waitUntil` task, in this order: salt fetch → `deriveVid` → `WAE.writeDataPoint` → DO event
-delivery.
+delivery. If the salt fetch fails, the same task writes the WAE point with `vid = ""` and stops
+there (§4).
 
 - **Reason.** The first `getSalt` in an isolate is a cross-colo DO round trip. For named DOs,
   "the first time you get a Durable Object stub based on an ID derived from a name … this
@@ -206,6 +223,41 @@ delivery.
   - This is documented rather than engineered away. It is a one-time, one-day,
     visitors-only inflation.
 
+### 7. Accepted trade-off: PITR keeps a deleted salt recoverable for 30 days
+
+SQLite-backed DOs support point-in-time recovery "to any point in time in the past 30 days",
+and it applies "to the entire SQLite database contents, including both the object's stored SQL
+data and stored key-value data"
+([SQLite storage API — PITR](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/),
+retrieved 2026-09-27). So the alarm's `DELETE` removes a salt from the live database, but the
+salt is still recoverable from the recovery log for up to 30 days.
+
+**The human accepted this trade-off on 2026-09-27.** Its bounds:
+
+- **Who.** Only someone who can deploy code to the Worker in the owner's Cloudflare account.
+  PITR is reached only through the DO's own API (`getBookmarkForTime` /
+  `onNextSessionRestoreBookmark`). Site visitors and dashboard viewers cannot reach it, and
+  neither can anyone else without account access.
+- **What it allows.** To confirm that a specific person visited on a specific past day, that
+  party would need four things: the restored salt, `IDENTITY_HMAC_SECRET`, the person's exact
+  IP and User-Agent for that day, and the vids WAE holds. With all four, they can recompute
+  the person's vid and look for it.
+- **What it does not allow.**
+  - Recovering an IP or UA from a vid.
+  - Linking one person across days or across sites.
+  - Doing anything after 30 days, when the recovery log ages out.
+- **Cost of a restore.** It rolls back the whole DO, including `seen` and `flushstate`, so it
+  is deliberate, disruptive and visible.
+- **Compared with the options.**
+  - KV's TTL made the salt unrecoverable about 1 h after its day ended. I found no documented
+    KV restore feature, but I have not proven KV has none.
+  - Option 2 (`HMAC(secret, day)`) makes every past salt recomputable **forever**, and was
+    rejected because that exposure is unbounded.
+  - This design's exposure is operator-only and ends at 30 days.
+- **No mitigation inside the DO.** Every kind of durable DO storage is covered by PITR. A salt
+  kept only in memory would be lost when the DO hibernates after 10 s (ADR-0010), which would
+  bring the split-salt bug back.
+
 ## Alternatives considered
 
 The requirement for every option: one salt per site per day, visible to every isolate
@@ -244,10 +296,10 @@ That removes the extra round trip and the memo. It was not adopted for three rea
 | axis | 1 KV read-back | 2 HMAC(secret, day) | **3 DO-owned (chosen)** |
 |------|----------------|---------------------|-------------------------|
 | One salt per site/day | ❌ same-colo only | ✅ | ✅ |
-| Deletion property | ✅ (KV TTL) | ❌ none, ever | ⚠️ yes, except PITR for 30 d (R1) |
+| Deletion property | ✅ ~1 h after day end (KV TTL) | ❌ unbounded | ⚠️ ~10 min after day end, but recoverable by an operator via PITR for 30 d (§7, accepted) |
 | Provisioned resources | KV ns (kept) | none (KV removed) | none (KV removed) |
 | Added requests | 0 | 0 | 1 DO req / isolate / site / day |
-| New failure mode | none | none | un-memoized isolate drops events if the DO is down |
+| New failure mode | none | none | un-memoized isolate writes WAE with `vid=""` and skips the DO while the DO is down |
 | Complexity | trivial | trivial | alarm multiplexing + memo map |
 | Lock-in | KV | none | DO (already load-bearing) |
 
@@ -259,24 +311,29 @@ is a per-site random value owned by that site's `SiteLive` DO, created on first 
 the DO alarm about 10 min after its UTC day ends*. The Consequences line "Daily-salt rotation is
 a Cron dependency" is superseded: salt availability is now a DO dependency, per §4.
 
-ADR-0002 already said "site-scoped salt", but the code used **one global salt for all sites**;
-the site scoping actually came from `site_id` being in the HMAC message. With this ADR the
-wording becomes literally true. It adds defense in depth; it is not a change to the
-unlinkability claim, which already held.
+**Correction to ADR-0002.** ADR-0002's "Site-scoped salt" wording was **inaccurate**. Until
+this ADR, the implementation used **one global salt per day for all sites** (a single KV key,
+`salt:<day>`). The unlinkability of one person across two sites came entirely from `site_id`
+being in the HMAC message, and that already held. Under this ADR, salts really are per-site.
+That adds defense in depth, but it does not change the unlinkability claim. Because salts are
+now per-site, the salt-fetch cost scales with **isolates × sites** rather than with isolates
+alone (see Cost).
 
 **ADR-0011, amended.** ADR-0011 already made the DO the sole source of dashboard numbers. This
 ADR also makes the DO the source of identity. Two consequences follow:
 
 - Amendment 3 (don't deploy near midnight) no longer applies (§6).
-- The "WAE retains raw events, so any day can be recomputed" backstop no longer covers events
-  dropped on a salt-fetch failure: those are lost from WAE too. See R4.
+- The "WAE retains raw events, so any day can be recomputed" backstop still covers events
+  whose salt fetch failed. They are written to WAE with `vid = ""` (§4). Their pageviews are
+  recomputable, but their visitors are not, and they never reach the DO rollup.
 
-**Privacy doc.** `docs/privacy.md` §2 must be updated in three places:
+**Privacy doc.** `docs/privacy.md` §2 is rewritten on this branch in a separate commit. It
+now says:
 
-- where the salt lives: DO SQLite, not KV;
-- when it expires: about 10 min after the day ends, not about 1 h; and
-- the PITR caveat (R1). Without it, the page's statement that "once a day's salt is gone, no
-  one … has the input needed" is no longer strictly accurate.
+- the salt is per-site and stored in the site's DO;
+- it is deleted about 10 min after its day ends; and
+- it is recoverable via PITR for up to 30 days by someone with deploy access, with what that
+  does and does not allow (§7).
 
 **Cost** (DO prices from the [pricing page](https://developers.cloudflare.com/durable-objects/platform/pricing/),
 last updated Aug 25 2026; KV prices from the
@@ -291,9 +348,12 @@ updated Aug 28 2026; both retrieved 2026-09-27):
   overage rates, and in practice absorbed by the 1M included.
 - **Removed.** One KV read per isolate per day (Paid: $0.50/M after 10M included) and about
   one KV write per day.
-- **Net ≈ zero for a self-host with a handful of sites.** Note the scaling term changes from
-  isolates (the old salt was global) to **isolates × sites**. With 50 busy sites this is still
-  cents per month, but it is no longer site-count-independent.
+- **Net ≈ zero for a self-host with a handful of sites**, but the comparison is not
+  like-for-like. The old salt was one global value, so its cost was one KV read per isolate
+  per day **regardless of site count**. The new cost is one DO request per isolate **per
+  site** per day, so it scales with **isolates × sites**. Example: 50 busy sites × 1,000
+  isolates/day ≈ 1.5M requests/month ≈ $0.08/month beyond the included 1M. That is still
+  cents, but it is no longer independent of site count.
 - **DO storage.** One salt insert and one delete per site per day, plus the `setAlarm` rows in
   §3. Immaterial next to the per-pageview `seen` writes.
 - **Free-plan ceiling.** See R3.
@@ -325,38 +385,27 @@ whether fake timers reach DO code.
    (`getAlarm()` is null after drain): it holds only when the DO holds no salt.
 7. **Cold-start re-arm.** A DO with a salt row and no alarm re-arms the salt deadline in
    rehydrate.
-8. **Fetch failure drops the event.** Stub `getSalt` to throw: no WAE data point is written,
-   no DO `/event` is delivered, the response is still 204, and no KV is touched. A
-   `.retryable` error is retried once; an `.overloaded` error is not retried.
+8. **Fetch failure keeps the WAE point with an empty vid.** Stub `getSalt` to throw. Assert:
+   - exactly one WAE data point is written, with blob1 `""` and every other field populated;
+   - no DO `/event` is delivered;
+   - the response is still 204;
+   - no KV is touched;
+   - a `.retryable` error is retried once, and an `.overloaded` error is not retried.
 9. **Replace** the KV-specific tests: `test/identity.test.ts` `getDailySalt` and
    `test/collector.test.ts:744` (`env.SALT` spy). The collector test instead asserts one DO
    `getSalt` per (site, day) per isolate.
 
-## Reviewer notes / open questions
+## Recorded risks and monitoring
 
-These are flagged, not silently designed around. None of them changes the decision unless the
-human says so.
+The human has resolved the review's open questions. R1 (PITR) is accepted as §7. R4 (write
+WAE on salt failure) is adopted as §4. The cost-scaling correction is folded into Consequences.
+The doc follow-ups (privacy §2, README, ADR-0006, the ADR index) are done in separate commits on
+this branch. The `wrangler.jsonc` comments are left to the implementation PR, which removes the
+binding there.
 
-- **R1: PITR weakens the deletion property (the most important note).** SQLite-backed DOs
-  support point-in-time recovery "to any point in time in the past 30 days", and it "appl[ies]
-  to the entire SQLite database contents, including both the object's stored SQL data and
-  stored key-value data"
-  ([SQLite storage API — PITR](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)).
-  - **Effect.** A "deleted" salt can be recovered for 30 days by anyone who can deploy code to
-    the Worker. That same party also holds `IDENTITY_HMAC_SECRET`, and WAE still holds the
-    vids. The retrospective-confirmation window therefore grows from about 1 h after the day
-    ends (KV TTL) to **about 30 days**.
-  - **Comparison.** This is still bounded, unlike option 2, and it needs a deliberate restore.
-    A restore rolls back the whole DO, including `seen` and `flushstate`, so it is disruptive
-    and visible.
-  - **No clean in-DO mitigation.** Any durable DO storage is covered by PITR, and a RAM-only
-    salt would be lost at the 10 s hibernation (ADR-0010) and reintroduce the split-salt bug.
-  - **Unverified comparison.** I found no documented restore feature for KV, but I have not
-    proven that KV has none.
-  - **Recommendation:** accept, and state it honestly in `docs/privacy.md` as "a past day's
-    salt is irrecoverable after 30 days; within 30 days, only an account operator performing a
-    DO point-in-time restore could recover it". **Needs the human's explicit acknowledgement**,
-    because it changes a published privacy claim.
+The remaining risks below are accepted and monitored. The original R-numbers are kept so
+earlier references still resolve.
+
 - **R2: The collector and the DO each decide the day with their own clocks.** An event minted
   with collector-day D can be counted in `seen` under DO-day D+1 within milliseconds of
   midnight. This already happens today and is negligible. The validity window in §1 absorbs
@@ -374,14 +423,6 @@ human says so.
     event through an `RpcTarget` stub. Calls on "the returned stub are part of the same RPC
     session" and are billed as one request (pricing page). It is more complex, so it is not
     done up front.
-- **R4: Dropping on salt failure also drops the WAE copy.** Before this change, a DO outage lost
-  only the rollup, and WAE kept the raw event for a manual recompute.
-  - Now an un-memoized isolate loses both.
-  - **Option for the human:** on salt failure, still write the WAE data point with `vid = ""`.
-    Pageviews stay recomputable, visitors are not polluted, and salts are never mixed. It
-    costs one extra branch.
-  - I lean towards adopting it, but it changes the human's stated "drop the event", so it is
-    not written into the Decision.
 - **R5: DO placement adds latency for distant isolates.** The DO lives "close to where it is
   first requested"
   ([What are DOs](https://developers.cloudflare.com/durable-objects/concepts/what-are-durable-objects/)).
@@ -394,10 +435,3 @@ human says so.
   the binding constraint. The salt changes nothing here, but a midnight burst of cold isolates
   now hits the DO with `getSalt` and `/event` together. Watch for `.overloaded` right after
   00:00 on the busiest site.
-- **R7: Stale text left behind (follow-ups, not in this commit).**
-  - `wrangler.jsonc` comments still describe the `scheduled()` cron and the SALT namespace.
-  - `README.md` lines 33 and 98 and ADR-0006 line 23 list "KV (cache + salt)".
-  - `docs/privacy.md` §2 (above).
-  - The `docs/decisions/README.md` index needs a 0013 row, and the "0002" row should be marked
-    "salt clause amended by 0013".
-  - These were left out because this commit was scoped to this file only.
