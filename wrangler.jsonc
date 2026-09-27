@@ -3,7 +3,8 @@
   //
   // TOPOLOGY DECISION (foundation): ONE Worker hosts everything — the collector
   // HTTP route (`POST /e`), the SSR dashboard + marketing routes, and the
-  // `scheduled()` cron handler for the WAE -> D1 rollup + daily-salt rotation.
+  // `SiteLive` Durable Object (live count, D1 rollup, daily identity salt — the
+  // cron is retired, ADR-0011 / ADR-0013).
   // The technical spec (§9.1) sketches the collector as "a second Worker (or a
   // route) sharing the same bindings"; we take the route option deliberately:
   // one deploy target = the simplest one-click "Deploy to Cloudflare" story
@@ -24,8 +25,8 @@
   // pre-provisioning needed (spec §7.3). Index = site_id, 1 dp per event.
   "analytics_engine_datasets": [{ "binding": "WAE", "dataset": "skopia_events" }],
 
-  // Relational metadata + exact daily rollups (written by cron, read by the
-  // dashboard). `database_id` is filled by `wrangler deploy` / the Deploy button.
+  // Relational metadata + exact daily rollups (written by the SiteLive DO, read
+  // by the dashboard). `database_id` is filled by `wrangler deploy` / the Deploy button.
   "d1_databases": [
     {
       "binding": "DB",
@@ -35,19 +36,15 @@
     }
   ],
 
-  // CACHE = dashboard response cache (60-120 s TTL). SALT = rotating daily salt
-  // for the cookieless visitor hash (spec §4 / §5.3). Two namespaces, one store
-  // each. `id` is filled on deploy.
-  "kv_namespaces": [
-    { "binding": "CACHE", "id": "placeholder-set-on-deploy" },
-    { "binding": "SALT", "id": "placeholder-set-on-deploy" }
-  ],
+  // CACHE = dashboard response cache (60-120 s TTL). The daily identity salt is
+  // NOT in KV: the SiteLive DO owns it (ADR-0013). `id` is filled on deploy.
+  "kv_namespaces": [{ "binding": "CACHE", "id": "placeholder-set-on-deploy" }],
 
-  // Per-site live visitor count. One `SiteLive` instance per site
-  // (`idFromName(site_id)`). In-memory state only (no SQLite storage cost in the
-  // live path, spec §6) — but declared as a SQLite-backed class per current
-  // Cloudflare guidance (SQLite storage is the default for all new DOs; it is
-  // free when unused and is the only forward-compatible migration path).
+  // Per-site live visitor count, rollup and daily salt. One `SiteLive` instance
+  // per site (`idFromName(site_id)`). SQLite-backed per current Cloudflare
+  // guidance; its storage holds the durable `seen` set, pending counters
+  // (ADR-0010) and the `salt` table (ADR-0013, created in the constructor — no
+  // migration tag needed).
   "durable_objects": {
     "bindings": [{ "name": "SITE_LIVE", "class_name": "SiteLive" }]
   },

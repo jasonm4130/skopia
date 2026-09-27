@@ -6,12 +6,11 @@
  * - Different salt → different vid (cross-day correlation impossible)
  * - Raw IP never appears in the output
  * - utcDay formatting
- * - getDailySalt: creates on first access, stable on repeat calls, 25h self-expiring TTL
+ * (The daily salt itself is owned by the SiteLive DO — see test/site-live.test.ts.)
  */
 
-import { env } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
-import { deriveVid, getDailySalt, utcDay } from "../src/shared/identity";
+import { describe, expect, it } from "vitest";
+import { deriveVid, utcDay } from "../src/shared/identity";
 
 describe("utcDay", () => {
   it("formats a UTC date as YYYY-MM-DD", () => {
@@ -68,46 +67,6 @@ describe("deriveVid", () => {
     const v1 = await deriveVid(SECRET, SALT, "1.2.3.4", UA, SITE);
     const v2 = await deriveVid(SECRET, SALT, "5.6.7.8", UA, SITE);
     expect(v1).not.toBe(v2);
-  });
-});
-
-describe("getDailySalt", () => {
-  it("creates a random salt on first access", async () => {
-    const salt = await getDailySalt(env.SALT, "2026-06-21");
-    expect(typeof salt).toBe("string");
-    expect(salt.length).toBeGreaterThan(0);
-  });
-
-  it("returns the same salt on repeat calls for the same day", async () => {
-    const s1 = await getDailySalt(env.SALT, "2026-06-22");
-    const s2 = await getDailySalt(env.SALT, "2026-06-22");
-    expect(s1).toBe(s2);
-  });
-
-  it("returns different salts for different days", async () => {
-    const s1 = await getDailySalt(env.SALT, "2026-06-23");
-    const s2 = await getDailySalt(env.SALT, "2026-06-24");
-    // Different days → different (independently generated) salts
-    // (They COULD theoretically be equal with negligible probability — acceptable)
-    expect(typeof s1).toBe("string");
-    expect(typeof s2).toBe("string");
-  });
-
-  it("stores a new salt expiring ~1h after its UTC day ends, not 25h from creation", async () => {
-    // Anchored to the day boundary: a salt first requested at 18:00Z must not
-    // survive most of the NEXT day (controller adjudication of the Task-12
-    // privacy-window-widening plan-conflict).
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-06-28T18:00:00Z")); // 6h left in the day
-      const putSpy = vi.spyOn(env.SALT, "put");
-      await getDailySalt(env.SALT, "2026-06-28");
-      expect(putSpy).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
-        expirationTtl: 7 * 60 * 60, // 6h remaining + 1h grace
-      });
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

@@ -24,9 +24,7 @@ export interface Env {
   DB: D1Database;
   /** Dashboard response cache, 60-120 s TTL (spec §5.3). */
   CACHE: KVNamespace;
-  /** Rotating daily salt for the cookieless visitor hash (spec §4 / §5.3). */
-  SALT: KVNamespace;
-  /** Per-site live-visitor Durable Object, one instance per site (spec §6). */
+  /** Per-site Durable Object: live count, rollup, daily salt (spec §6, ADR-0013). */
   SITE_LIVE: SiteLiveNamespace;
 
   // ---- vars (wrangler.jsonc `vars`) ----
@@ -117,6 +115,11 @@ export interface WaeEvent {
   entryPath: string;
   /** blob13 — small JSON of custom-event props (capped). '' when none. */
   propsJson: string;
+  /**
+   * blob14 — the collector's designated UTC event day, 'YYYY-MM-DD' (ADR-0013
+   * §1a). A manual WAE recompute buckets by this, not by the write timestamp.
+   */
+  eventDay: string;
 
   // ---- doubles (numbers) ----
   /** double1 — event count, always 1 (SUM(_sample_interval*double1)=events). */
@@ -131,8 +134,9 @@ export interface WaeEvent {
 export type DeviceClass = "mobile" | "tablet" | "desktop";
 
 /**
- * Ordered blob slot names, blob1..blob13. The index in this array + 1 is the WAE
- * `blobN` slot. Slots 14..20 are reserved (web-vitals, outbound target, etc.).
+ * Ordered blob slot names, blob1..blob14. The index in this array + 1 is the WAE
+ * `blobN` slot. Slots 15..20 are reserved (web-vitals, outbound target, etc.).
+ * Append only: existing slots never move.
  */
 export const WAE_BLOB_SLOTS = [
   "vid",
@@ -148,6 +152,7 @@ export const WAE_BLOB_SLOTS = [
   "eventName",
   "entryPath",
   "propsJson",
+  "eventDay",
 ] as const satisfies readonly (keyof WaeEvent)[];
 
 /**

@@ -12,6 +12,8 @@ import type { RollupDimension } from "../shared/types";
 
 export interface CountEvent {
   siteId: string;
+  /** The collector's designated UTC event day (ADR-0013 §1a); the rollup bucket. */
+  day: string;
   vid: string;
   isPageview: 0 | 1;
   path: string;

@@ -19,7 +19,9 @@ import {
 } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { handleCollect, handlePreflight } from "../src/collector/index";
+import type { SiteLive } from "../src/dashboard/site-live";
 import worker from "../src/index";
+import { deriveVid, utcDay } from "../src/shared/identity";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../src/shared/types";
 import { applyMigrations } from "./apply-migrations";
 
@@ -72,6 +74,44 @@ function makeBeaconRequest(
     writable: false,
   });
   return req;
+}
+
+type DataPoint = { indexes: string[]; blobs: string[]; doubles: number[] };
+
+/** Capture every WAE data point written (restore with vi.restoreAllMocks). */
+function captureWae(): DataPoint[] {
+  const writes: DataPoint[] = [];
+  vi.spyOn(env.WAE, "writeDataPoint").mockImplementation((dp) => {
+    writes.push(dp as DataPoint);
+  });
+  return writes;
+}
+
+/**
+ * Record each `getSalt(day)` the collector sends to a site's DO, passing the
+ * call through to the real DO (restore with vi.restoreAllMocks).
+ */
+function spySaltFetches(): { calls: [string, string][] } {
+  const calls: [string, string][] = [];
+  const realGet = env.SITE_LIVE.get.bind(env.SITE_LIVE);
+  const realIdFromName = env.SITE_LIVE.idFromName.bind(env.SITE_LIVE);
+  const names = new Map<string, string>();
+  vi.spyOn(env.SITE_LIVE, "idFromName").mockImplementation((name) => {
+    const id = realIdFromName(name);
+    names.set(id.toString(), name);
+    return id;
+  });
+  vi.spyOn(env.SITE_LIVE, "get").mockImplementation((id) => {
+    const stub = realGet(id) as DurableObjectStub<SiteLive>;
+    return {
+      getSalt: (day: string) => {
+        calls.push([names.get(id.toString()) ?? "?", day]);
+        return stub.getSalt(day);
+      },
+      fetch: (req: Request) => stub.fetch(req),
+    } as unknown as DurableObjectStub;
+  });
+  return { calls };
 }
 
 // ---------------------------------------------------------------------------
@@ -375,8 +415,9 @@ describe("handleCollect — WAE slot mapping", () => {
     expect(dp.indexes).toHaveLength(1);
     expect(dp.indexes[0]).toBe("test-site");
 
-    // Blobs: must match WAE_BLOB_SLOTS length (13)
+    // Blobs: must match WAE_BLOB_SLOTS length (14)
     expect(dp.blobs).toHaveLength(WAE_BLOB_SLOTS.length);
+    expect(dp.blobs).toHaveLength(14);
 
     // Blob1 = vid (16-hex)
     expect(dp.blobs[0]).toMatch(/^[0-9a-f]{16}$/);
@@ -404,6 +445,8 @@ describe("handleCollect — WAE slot mapping", () => {
     expect(dp.blobs[11]).toBe("/test-page");
     // Blob13 = props_json (empty for pageview)
     expect(dp.blobs[12]).toBe("");
+    // Blob14 = event_day, the collector's designated UTC day (ADR-0013 §1a)
+    expect(dp.blobs[13]).toBe(utcDay(new Date()));
 
     // Doubles: must match WAE_DOUBLE_SLOTS length (3)
     expect(dp.doubles).toHaveLength(WAE_DOUBLE_SLOTS.length);
@@ -728,40 +771,267 @@ describe("handleCollect — hot-path caching (Task 7)", () => {
     vi.restoreAllMocks();
   });
 
-  it("caches the daily salt: two beacons on the same day cost one KV get", async () => {
-    // A synthetic day no other test touches keeps the day-keyed salt memo
-    // cold at the start of this test, regardless of file execution order.
+  it("fetches the salt from the site's DO once per (site, day) per isolate (ADR-0013 §2)", async () => {
+    for (const id of ["salt-memo-a", "salt-memo-b"]) {
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+      )
+        .bind(id, id, `${id}.example`, "")
+        .run();
+    }
+    const fetches = spySaltFetches();
+    try {
+      const ctx = createExecutionContext();
+      for (const [site, ip] of [
+        ["salt-memo-a", "203.0.113.70"],
+        ["salt-memo-a", "203.0.113.71"],
+        ["salt-memo-b", "203.0.113.72"],
+        ["salt-memo-b", "203.0.113.73"],
+      ] as const) {
+        await handleCollect(makeBeaconRequest({ t: "pv", s: site, p: "/" }, { ip }), env, ctx);
+      }
+      await waitOnExecutionContext(ctx);
+
+      const today = utcDay(new Date());
+      expect(fetches.calls).toEqual([
+        ["salt-memo-a", today],
+        ["salt-memo-b", today],
+      ]);
+      expect(await env.CACHE.list()).toEqual(expect.objectContaining({ keys: [] })); // no KV
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("rolls to a new salt at UTC midnight: memo misses, old-day entries dropped, vid changes", async () => {
+    for (const id of ["rollover-a", "rollover-b"]) {
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+      )
+        .bind(id, id, `${id}.example`, "")
+        .run();
+    }
+    const writes = captureWae();
+    const fetches = spySaltFetches();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const beacon = async (site: string) => {
+        const ctx = createExecutionContext();
+        await handleCollect(
+          makeBeaconRequest({ t: "pv", s: site, p: "/" }, { ip: "198.51.100.9" }),
+          env,
+          ctx,
+        );
+        await waitOnExecutionContext(ctx);
+      };
+      vi.setSystemTime(new Date("2031-06-01T23:59:00Z"));
+      await beacon("rollover-a");
+      await beacon("rollover-b");
+      vi.setSystemTime(new Date("2031-06-02T00:01:00Z"));
+      await beacon("rollover-a"); // new day: memo miss
+      await beacon("rollover-a"); // memo hit
+      // A late D beacon for site B (inside GRACE): its D entry was dropped at the
+      // rollover, so it is fetched again rather than served from isolate RAM.
+      vi.setSystemTime(new Date("2031-06-01T23:59:30Z"));
+      await beacon("rollover-b");
+
+      expect(fetches.calls).toEqual([
+        ["rollover-a", "2031-06-01"],
+        ["rollover-b", "2031-06-01"],
+        ["rollover-a", "2031-06-02"],
+        ["rollover-b", "2031-06-01"],
+      ]);
+      const [a0, , a1, a2] = writes;
+      expect(a0?.blobs[0]).not.toBe(a1?.blobs[0]); // same IP+UA, new day → new vid
+      expect(a1?.blobs[0]).toBe(a2?.blobs[0]);
+      expect(writes.map((w) => w.blobs[13])).toEqual([
+        "2031-06-01",
+        "2031-06-01",
+        "2031-06-02",
+        "2031-06-02",
+        "2031-06-01",
+      ]);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("uses one event day end to end: a 23:59:59 beacon keeps D's salt and rolls up under D", async () => {
+    const site = "eday-collector-site";
     await env.DB.prepare(
       "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
     )
-      .bind("salt-cache-site", "Salt Cache Site", "saltcache.example", "")
+      .bind(site, site, "eday.example", "")
       .run();
-
-    vi.useFakeTimers();
+    const d = "2031-07-01";
+    const stub = env.SITE_LIVE.get(env.SITE_LIVE.idFromName(site));
+    await runInDurableObject(stub, (instance) => {
+      // The DO's clock is already on D+1 when the beacon's salt fetch arrives.
+      (instance as unknown as { clock: () => number }).clock = () =>
+        Date.parse("2031-07-02T00:00:03Z");
+    });
+    const writes = captureWae();
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      vi.setSystemTime(new Date("2031-05-17T12:00:00Z"));
-
-      const getSpy = vi.spyOn(env.SALT, "get");
-      getSpy.mockClear();
-
+      vi.setSystemTime(new Date(`${d}T23:59:59Z`)); // collector receipt time
       const ctx = createExecutionContext();
       await handleCollect(
-        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/a" }, { ip: "203.0.113.70" }),
+        makeBeaconRequest({ t: "pv", s: site, p: "/" }, { ip: "198.51.100.10" }),
         env,
         ctx,
       );
-      await handleCollect(
-        makeBeaconRequest({ t: "pv", s: "salt-cache-site", p: "/b" }, { ip: "203.0.113.71" }),
+      await waitOnExecutionContext(ctx);
+    } finally {
+      vi.useRealTimers();
+    }
+    vi.restoreAllMocks();
+
+    const saltD = await (stub as DurableObjectStub<SiteLive>).getSalt(d);
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0";
+    expect(writes[0]?.blobs[0]).toBe(
+      await deriveVid(env.IDENTITY_HMAC_SECRET, saltD, "198.51.100.10", ua, site),
+    );
+    expect(writes[0]?.blobs[13]).toBe(d);
+
+    const { runDurableObjectAlarm } = await import("cloudflare:test");
+    await runDurableObjectAlarm(stub);
+    const rows = await env.DB.prepare(
+      "SELECT day FROM rollup_daily WHERE site_id=? AND dimension='total'",
+    )
+      .bind(site)
+      .all<{ day: string }>();
+    expect(rows.results).toEqual([{ day: d }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Salt-fetch failure path (ADR-0013 §4, §5)
+// ---------------------------------------------------------------------------
+
+/** Replace the site DO with a fake whose getSalt follows `impl`; count /event calls. */
+function fakeSiteLive(impl: () => Promise<string>) {
+  const getSalt = vi.fn(impl);
+  const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.spyOn(env.SITE_LIVE, "get").mockImplementation(
+    () => ({ getSalt, fetch }) as unknown as DurableObjectStub,
+  );
+  return { getSalt, fetch };
+}
+
+async function registerOpenSite(id: string): Promise<void> {
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO sites (id, name, domain, origin_allowlist) VALUES (?, ?, ?, ?)",
+  )
+    .bind(id, id, `${id}.example`, "")
+    .run();
+}
+
+describe("handleCollect — salt fetch failure (ADR-0013 §4)", () => {
+  it("still writes WAE with an empty vid, skips the DO, answers 204, touches no KV", async () => {
+    await registerOpenSite("salt-fail-site");
+    const writes = captureWae();
+    const kv = [vi.spyOn(env.CACHE, "get"), vi.spyOn(env.CACHE, "put")];
+    const dobj = fakeSiteLive(() => Promise.reject(new Error("DO unavailable")));
+    try {
+      const ctx = createExecutionContext();
+      const res = await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-fail-site", p: "/x", w: 1440 }, { ip: "192.0.2.1" }),
         env,
         ctx,
       );
       await waitOnExecutionContext(ctx);
 
-      expect(getSpy).toHaveBeenCalledTimes(1);
-
+      expect(res.status).toBe(204);
+      expect(writes).toHaveLength(1);
+      const dp = writes[0]!;
+      expect(dp.blobs[0]).toBe(""); // no vid
+      expect(dp.blobs[1]).toBe("/x");
+      expect(dp.blobs[6]).toBe("US");
+      expect(dp.blobs[8]).toBe("Chrome");
+      expect(dp.blobs[13]).toBe(utcDay(new Date()));
+      expect(dp.doubles).toEqual([1, 1, 1440]);
+      expect(dobj.getSalt).toHaveBeenCalledTimes(1); // plain errors are not retried
+      expect(dobj.fetch).not.toHaveBeenCalled(); // no DO /event delivery
+      for (const spy of kv) expect(spy).not.toHaveBeenCalled();
+    } finally {
       vi.restoreAllMocks();
+    }
+  });
+
+  it("retries a .retryable error once with a fresh stub", async () => {
+    await registerOpenSite("salt-retry-site");
+    const writes = captureWae();
+    const retryable = Object.assign(new Error("transient"), { retryable: true });
+    let n = 0;
+    const dobj = fakeSiteLive(() => (n++ === 0 ? Promise.reject(retryable) : Promise.resolve("s")));
+    try {
+      const ctx = createExecutionContext();
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-retry-site", p: "/" }, { ip: "192.0.2.2" }),
+        env,
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+
+      expect(dobj.getSalt).toHaveBeenCalledTimes(2);
+      expect(env.SITE_LIVE.get).toHaveBeenCalledTimes(3); // 2 salt stubs + 1 delivery
+      expect(writes[0]?.blobs[0]).toMatch(/^[0-9a-f]{16}$/);
+      expect(dobj.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("never retries an .overloaded error", async () => {
+    await registerOpenSite("salt-overload-site");
+    const writes = captureWae();
+    const overloaded = Object.assign(new Error("overloaded"), {
+      retryable: true,
+      overloaded: true,
+    });
+    const dobj = fakeSiteLive(() => Promise.reject(overloaded));
+    try {
+      const ctx = createExecutionContext();
+      await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-overload-site", p: "/" }, { ip: "192.0.2.3" }),
+        env,
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+
+      expect(dobj.getSalt).toHaveBeenCalledTimes(1);
+      expect(writes[0]?.blobs[0]).toBe("");
+      expect(dobj.fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("treats a getSalt that never settles as a failure after 5 s", async () => {
+    await registerOpenSite("salt-stall-site");
+    const writes = captureWae();
+    const dobj = fakeSiteLive(() => new Promise<string>(() => {}));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ctx = createExecutionContext();
+      const res = await handleCollect(
+        makeBeaconRequest({ t: "pv", s: "salt-stall-site", p: "/" }, { ip: "192.0.2.4" }),
+        env,
+        ctx,
+      );
+      expect(res.status).toBe(204); // answered before any identity work settles
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(writes).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await waitOnExecutionContext(ctx); // settled at 5 s, far inside waitUntil's 30 s
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]?.blobs[0]).toBe("");
+      expect(dobj.fetch).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
+      vi.restoreAllMocks();
     }
   });
 });

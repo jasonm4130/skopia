@@ -6,7 +6,7 @@
  * (no alarm involved — see `currentSnapshot()`), and treats the map size as
  * the live-visitor count. Dashboards connect over a hibernatable WebSocket
  * (`acceptWebSocket`/`getWebSockets`) and receive the count + top active pages
- * on change.
+ * on change. It also owns the site's daily identity salt (ADR-0013).
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -28,6 +28,27 @@ const SEEN_DDL = `CREATE TABLE IF NOT EXISTS seen (
   vid        TEXT NOT NULL,
   PRIMARY KEY (day, dimension, dim_value, vid)
 ) WITHOUT ROWID`;
+
+/** Per-site daily identity salt (ADR-0013 §1). One row per live UTC day. */
+const SALT_DDL = `CREATE TABLE IF NOT EXISTS salt (
+  day   TEXT PRIMARY KEY,
+  salt  TEXT NOT NULL
+) WITHOUT ROWID`;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A day's salt is served until end(day) + GRACE, then deleted (ADR-0013 §1). */
+const SALT_GRACE_MS = 10 * 60 * 1000;
+
+/** Re-arm delay when the expired-salt DELETE itself failed (ADR-0013 §3). */
+const SALT_RETRY_MS = 60_000;
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** end(day) + GRACE: the instant a day's salt stops being served and is deleted. */
+function saltDeadline(day: string): number {
+  return Date.parse(`${day}T00:00:00Z`) + DAY_MS + SALT_GRACE_MS;
+}
 
 /** Phase 2 (cutover, ADR-0011): the DO is the sole writer of "rollup_daily". */
 const FLUSH_TABLE = "rollup_daily";
@@ -100,27 +121,89 @@ export class SiteLive extends DurableObject<Env> {
   /** Per-(day,dimension,dim_value) pageview delta since the last flush. */
   private pending = new Map<string, PendingRow>();
 
-  /** Last UTC day the durable `seen` set was pruned (RAM; re-prunes on loss). */
+  /** Last expired UTC day `seen` was pruned through (RAM; re-prunes on loss). */
   private lastPruneDay: string | null = null;
 
   /** site_id, learned from the first event (needed for the D1 flush). */
   private siteId: string | null = null;
 
+  /** Wall clock for salt windows and alarm deadlines; injectable for tests. */
+  private clock: () => number = () => Date.now();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Schema setup is synchronous; safe in the constructor for SQLite DOs.
     this.ctx.storage.sql.exec(SEEN_DDL);
+    this.ctx.storage.sql.exec(SALT_DDL);
     // Rehydrate un-flushed counters from durable storage before any request or
     // alarm runs, so a cold-started instance (post-hibernation) flushes the real
     // deltas instead of an empty map (ADR-0010).
     this.ctx.blockConcurrencyWhile(async () => {
       await this.rehydrate();
-      // If we came back holding un-flushed work but no alarm is armed, arm one so
-      // the deltas still reach D1.
-      if (this.pending.size > 0 && (await this.ctx.storage.getAlarm()) === null) {
-        await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
-      }
+      await this.rearmOnWake();
     });
+  }
+
+  /**
+   * Cold-start alarm restore: un-flushed work still reaches D1, and a stored
+   * salt is still deleted on time with no further traffic (ADR-0013 §3).
+   */
+  private async rearmOnWake(): Promise<void> {
+    if (this.pending.size > 0) await this.armBy(this.clock() + ALARM_INTERVAL_MS);
+    const deadline = this.earliestSaltDeadline();
+    if (deadline !== null) await this.armBy(deadline);
+  }
+
+  /**
+   * The one alarm slot always holds the earliest outstanding deadline (flush
+   * tick or salt expiry). Every arming goes through here (ADR-0013 §3).
+   */
+  private async armBy(t: number): Promise<void> {
+    const cur = await this.ctx.storage.getAlarm();
+    if (cur === null || cur > t) await this.ctx.storage.setAlarm(t);
+  }
+
+  /**
+   * Get-or-create this site's salt for `day` (ADR-0013 §1). The SELECT and the
+   * INSERT are synchronous with no await between them, so concurrent callers
+   * cannot interleave: exactly one salt per site per day. Served only inside
+   * [start(day), end(day) + GRACE) by this DO's clock — no early issuance, and
+   * a deleted past day is never re-minted.
+   */
+  async getSalt(day: string): Promise<string> {
+    const now = this.clock();
+    this.sweepSalts(now); // lazy backstop to the alarm
+    if (!DAY_RE.test(day) || now < Date.parse(`${day}T00:00:00Z`) || now >= saltDeadline(day)) {
+      throw new Error(`salt for ${day} is outside its validity window`);
+    }
+    const sql = this.ctx.storage.sql;
+    const row = sql.exec<{ salt: string }>("SELECT salt FROM salt WHERE day = ?", day).toArray()[0];
+    if (row) return row.salt;
+
+    let salt = "";
+    for (const b of crypto.getRandomValues(new Uint8Array(32))) {
+      salt += b.toString(16).padStart(2, "0");
+    }
+    sql.exec("INSERT INTO salt (day, salt) VALUES (?, ?)", day, salt);
+    await this.armBy(saltDeadline(day));
+    return salt;
+  }
+
+  /** Delete every salt whose end(day) + GRACE has passed. Synchronous, idempotent. */
+  private sweepSalts(now: number): void {
+    this.ctx.storage.sql.exec("DELETE FROM salt WHERE day <= ?", this.lastExpiredDay(now));
+  }
+
+  /** The latest UTC day whose salt deadline is <= now (days sort as strings). */
+  private lastExpiredDay(now: number): string {
+    return utcDay(new Date(now - DAY_MS - SALT_GRACE_MS));
+  }
+
+  private earliestSaltDeadline(): number | null {
+    const row = this.ctx.storage.sql
+      .exec<{ d: string | null }>("SELECT MIN(day) AS d FROM salt")
+      .one();
+    return row.d === null ? null : saltDeadline(row.d);
   }
 
   /**
@@ -151,26 +234,38 @@ export class SiteLive extends DurableObject<Env> {
       return new Response("bad request", { status: 400 });
     }
 
+    this.sweepSalts(this.clock()); // lazy backstop to the alarm (ADR-0013 §3)
+
+    // Dimensional counting (new). A day with no salt here is dropped entirely.
+    if (!(await this.recordEvent(e))) return new Response(null, { status: 204 });
+
     // Live window: track visitor for the real-time dashboard.
     this.visitors.set(e.vid, { lastSeen: Date.now(), path: e.path });
 
-    // Dimensional counting (new).
-    await this.recordEvent(e);
-
-    // Arm the flush/evict alarm if none is pending (idempotent).
-    const current = await this.ctx.storage.getAlarm();
-    if (current === null) {
-      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
-    }
+    // Flush within 15 s even when a later salt-deadline alarm already holds the
+    // slot — "arm only if none is set" would leave pageviews un-flushed for hours.
+    await this.armBy(this.clock() + ALARM_INTERVAL_MS);
 
     this.broadcast();
     return new Response(null, { status: 204 });
   }
 
-  /** Record one enriched event into RAM deltas + the durable seen set (spec §5). */
-  async recordEvent(e: CountEvent): Promise<void> {
+  /**
+   * Record one enriched event into RAM deltas + the durable seen set (spec §5),
+   * under the collector's designated `e.day` (ADR-0013 §1a) so the salt and the
+   * rollup bucket agree. Only a day holding a salt row here is accepted: a
+   * forged, stale or already-deleted day is dropped and never gains rows.
+   */
+  async recordEvent(e: CountEvent): Promise<boolean> {
+    const day = e.day;
+    const known =
+      typeof day === "string" &&
+      this.ctx.storage.sql.exec("SELECT 1 FROM salt WHERE day = ?", day).toArray().length > 0;
+    if (!known) {
+      console.warn("SiteLive: dropped event for a day with no salt", day);
+      return false;
+    }
     this.siteId = e.siteId;
-    const day = utcDay(new Date());
 
     for (const c of eventDimensions(e)) {
       const key = pendingKey(day, c.dimension, c.dimValue);
@@ -193,6 +288,7 @@ export class SiteLive extends DurableObject<Env> {
     // Durably snapshot the counters so a hibernation before the next flush can't
     // drop them (ADR-0010). One put per event, independent of dimension count.
     await this.persistPending();
+    return true;
   }
 
   /** Reload the durable FlushState into RAM — the cold-start / construction path. */
@@ -341,31 +437,64 @@ export class SiteLive extends DurableObject<Env> {
     }
   }
 
-  /** Tick: flush counters, prune stale seen rows (spec §6). */
+  /**
+   * Tick: delete expired salts, flush counters, prune stale seen rows (spec §6,
+   * ADR-0013 §3). The salt DELETE runs first, on its own, so it never depends on
+   * D1 health; every later step is caught and logged, and the alarm always
+   * re-arms (platform retries give up after 6 throws).
+   */
   override async alarm(): Promise<void> {
-    await this.flush();
-
-    // Sweep the live map while we are here (busy-site growth bound — see
-    // evictStale). Costs no extra writes: this alarm was armed by `pending`.
-    this.evictStale();
-
-    // After a clean flush (nothing still owed), lazily prune the durable `seen`
-    // set of past days — at most one DELETE per UTC day per instance. Guarded on
-    // an empty `pending` so a failed flush never drops seen rows a retry needs.
-    if (this.pending.size === 0) {
-      const today = utcDay(new Date());
-      if (today !== this.lastPruneDay) {
-        this.ctx.storage.sql.exec("DELETE FROM seen WHERE day < ?", today);
-        this.lastPruneDay = today;
-      }
+    const now = this.clock();
+    let sweepFailed = false;
+    try {
+      this.sweepSalts(now);
+    } catch (err) {
+      sweepFailed = true;
+      console.error("SiteLive: expired-salt delete failed", err);
     }
 
-    // Reschedule only while there are counters still to flush. Live-visitor
-    // eviction is lazy (see `currentSnapshot()`) and no longer keeps the alarm
-    // ticking — a session with no further events must not trail up to ~20
-    // billed setAlarm row-writes waiting out the 5-minute live TTL.
-    if (this.pending.size > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    try {
+      await this.flush();
+    } catch (err) {
+      console.error("SiteLive: flush failed", err);
+    }
+
+    try {
+      // Sweep the live map while we are here (busy-site growth bound — see
+      // evictStale). Costs no extra writes: this alarm was armed by `pending`.
+      this.evictStale();
+
+      // After a clean flush (nothing still owed), lazily prune the durable `seen`
+      // set of past days — at most one DELETE per UTC day per instance. Guarded on
+      // an empty `pending` so a failed flush never drops seen rows a retry needs.
+      // Only days whose salt has expired: until end(day) + GRACE a late event can
+      // still land on that day (ADR-0013 §1a), and its flush sets visitors
+      // absolutely from `seen`.
+      if (this.pending.size === 0) {
+        const expired = this.lastExpiredDay(now);
+        if (expired !== this.lastPruneDay) {
+          this.ctx.storage.sql.exec("DELETE FROM seen WHERE day <= ?", expired);
+          this.lastPruneDay = expired;
+        }
+      }
+    } catch (err) {
+      console.error("SiteLive: alarm maintenance failed", err);
+    } finally {
+      // Re-arm at the earliest outstanding deadline: the flush tick while
+      // counters are owed, else the next salt expiry (or a DELETE retry). Live-
+      // visitor eviction is lazy (see `currentSnapshot()`) and never keeps the
+      // alarm ticking on its own.
+      const flushAt = this.pending.size > 0 ? this.clock() + ALARM_INTERVAL_MS : Infinity;
+      let saltAt = this.clock() + SALT_RETRY_MS;
+      if (!sweepFailed) {
+        try {
+          saltAt = this.earliestSaltDeadline() ?? Infinity;
+        } catch (err) {
+          console.error("SiteLive: salt deadline read failed", err);
+        }
+      }
+      const next = Math.min(flushAt, saltAt);
+      if (next !== Infinity) await this.ctx.storage.setAlarm(next);
     }
   }
 
