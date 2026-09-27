@@ -7,8 +7,8 @@ import { requireAuth } from "../auth";
 import type { DashEnv } from "../env";
 import { readLiveSnapshot } from "../live-snapshot";
 import { parseRange } from "../range";
+import { esc } from "../render/html";
 import { type Chrome, htmlDoc, shell } from "../render/layout";
-import { liveScript } from "../render/live";
 import { firstRunContent, noSitesPage } from "../render/pages";
 import { BREAKDOWN_VIEWS, breakdownPage, overviewContent, type ViewCtx } from "../views";
 
@@ -121,9 +121,11 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
     const main = firstRun
       ? firstRunContent(site, new URL(c.req.url).origin, live?.visitors ?? 0)
       : await content({ db: c.env.DB, site, range, nonce, ch, live });
-    const body = main + liveScript(site.id, nonce);
+    // The Overview (and first run) opens the /live socket: dash-live.js reads
+    // the site from <body data-live-site>. Other views carry no live display.
+    const liveOpts = live ? { live: true, bodyAttrs: ` data-live-site="${esc(site.id)}"` } : {};
 
-    return c.html(htmlDoc(title(site), shell(ch, body), nonce));
+    return c.html(htmlDoc(title(site), shell(ch, main), nonce, liveOpts));
   };
 
   // Overview

@@ -562,16 +562,17 @@ async function authedCookie(): Promise<string> {
 }
 
 describe("CSP nonce", () => {
-  it("authed /app inline <script> carries a nonce= attribute", async () => {
+  it("authed /app loads the live client as a nonced script, with no inline scripts", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Every inline <script> (no src) must be nonced for strict-dynamic CSP.
-    expect(text).toMatch(/<script nonce="[a-f0-9]+">/);
-    // No un-nonced inline script blocks.
-    expect(text).not.toMatch(/<script>\s*\n/);
+    // Scripts are static assets under the request nonce (strict-dynamic).
+    expect(text).toMatch(/<script src="\/assets\/dash-live\.js" nonce="[a-f0-9]+" defer>/);
+    expect(text).toContain('<body data-live-site="site-001">');
+    // No inline script blocks at all.
+    expect(text).not.toMatch(/<script(?![^>]*\ssrc=)[^>]*>/);
     // The CSP header from the root middleware advertises the same nonce.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
@@ -1133,40 +1134,13 @@ describe("live top-pages panel", () => {
     expect(text).toContain('id="live-pages"');
   });
 
-  it("live script consumes topPages and builds DOM safely (no innerHTML)", async () => {
-    const cookieVal = await authedCookie();
-    const { text } = await fetch_(
-      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
-    );
-    const script = text.slice(text.indexOf("function connect()"));
-    expect(script).toContain("d.topPages");
-    // Paths are visitor-controlled input: rows must be built via
-    // createElement/textContent, never innerHTML string concatenation.
-    expect(script).toContain("textContent=p.label");
-    expect(script).not.toContain("innerHTML+=");
-  });
-
-  it("non-Overview pages do not render the panel (script no-ops via null check)", async () => {
+  it("non-Overview pages carry no live panel and open no socket", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).not.toContain('id="live-pages-list"');
-  });
-
-  it("live script pings the socket on an interval to refresh a stale live count", async () => {
-    // Eviction is lazy server-side (site-live.ts currentSnapshot()): without a
-    // client-driven ping, a dashboard left open would show a stale count
-    // forever once a visitor leaves and no further site-wide traffic arrives.
-    const cookieVal = await authedCookie();
-    const { text } = await fetch_(
-      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
-    );
-    const script = text.slice(text.indexOf("function connect()"));
-    expect(script).toContain("setInterval(function(){");
-    expect(script).toContain("ws.send('ping')");
-    // The timer must be torn down on close so a reconnect doesn't leak a
-    // second ping loop stacked on top of the old one.
-    expect(script).toContain("clearInterval(pingTimer)");
+    expect(text).not.toContain('id="live-pages"');
+    expect(text).not.toContain("dash-live.js");
+    expect(text).not.toContain("data-live-site");
   });
 });
