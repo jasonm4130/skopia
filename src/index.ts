@@ -28,7 +28,7 @@ const app = new Hono<AppEnv>();
 // nonce mint + CSP/hardening header pass is pure cost with no security
 // benefit there. `/share/*` (launch-readiness Task 1, ADR-0012) mints its own
 // nonce and sets its own complete hardening header set via
-// publicSecurityHeaders(nonce) in src/dashboard/index.ts — this middleware
+// publicSecurityHeaders(nonce) in src/dashboard/routes/share.ts — this middleware
 // would only mint a nonce nothing reads and never gets applied to the
 // response.
 app.use("*", (c, next) =>
