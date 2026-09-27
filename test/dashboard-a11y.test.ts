@@ -353,44 +353,41 @@ describe("breakdown table", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Live regions — aria-live on the live badge + live-pages list (4.1.3)
+// Live regions — one throttled role=status summary for online-now (4.1.3)
 // ---------------------------------------------------------------------------
 
 describe("live regions", () => {
-  it("authed /app puts aria-live on the live-pages list", async () => {
+  it("authed /app renders the active-pages list and a separate role=status summary", async () => {
     const { root } = await render("/app", {
       headers: { Cookie: `skopia_session=${await authedCookie()}` },
     });
-    const list = root.querySelector("#live-pages-list");
-    expect(list?.getAttribute("aria-live")).toBeTruthy();
-    // The list is a <ul>, so the live script must append <li> rows.
+    // The list is a <ul>, so the live script reorders <li> rows keyed by path.
+    const list = root.querySelector("#live-pages");
     expect(list?.tagName?.toLowerCase()).toBe("ul");
+    // Announcements go through one throttled status line, not the list itself.
+    expect(list?.getAttribute("aria-live")).toBeFalsy();
+    expect(root.querySelector("#live-say")?.getAttribute("role")).toBe("status");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Chart — decorative <svg> is aria-hidden; a .sr-only <table> carries the data
-// (1.1.1); toggle buttons expose aria-pressed (4.1.2)
+// Chart — decorative <svg> is aria-hidden; a visible "Every day as a table"
+// <details> carries the data (1.1.1)
 // ---------------------------------------------------------------------------
 
 describe("chart accessibility", () => {
-  it("/share overview hides the decorative chart <svg> and exposes a .sr-only data <table>", async () => {
+  it("/share overview hides the decorative chart <svg> and exposes an every-day <table>", async () => {
     const { root } = await render(`/share/${VALID_TOKEN}`);
-    const svg = root.querySelector("#chart-svg");
+    const svg = root.querySelector(".plot svg");
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
     // Not also role=img — avoids double-announcement alongside the table.
     expect(svg?.getAttribute("role")).toBeFalsy();
-    const srTable = root.querySelector("table.sr-only");
-    expect(srTable, "visually-hidden chart data table").toBeTruthy();
-    expect(srTable?.querySelectorAll("th[scope]").length).toBeGreaterThanOrEqual(1);
+    expect(root.querySelector("details.days summary")?.text).toContain("Every day as a table");
+    const table = root.querySelector("details.days table");
+    expect(table, "every-day data table").toBeTruthy();
+    expect(table?.querySelectorAll("th[scope]").length).toBeGreaterThanOrEqual(1);
     // One data row per series point (MOCK_SERIES has 3).
-    expect(srTable?.querySelectorAll("tbody tr")).toHaveLength(MOCK_SERIES.length);
-  });
-
-  it("chart toggle buttons carry aria-pressed reflecting the active metric", async () => {
-    const { root } = await render(`/share/${VALID_TOKEN}`);
-    expect(root.querySelector("#btn-visitors")?.getAttribute("aria-pressed")).toBe("true");
-    expect(root.querySelector("#btn-pageviews")?.getAttribute("aria-pressed")).toBe("false");
+    expect(table?.querySelectorAll("tbody tr")).toHaveLength(MOCK_SERIES.length);
   });
 });
 

@@ -5,6 +5,7 @@ import { listSites } from "../../db/queries";
 import type { SiteRow } from "../../shared/types";
 import { requireAuth } from "../auth";
 import type { DashEnv } from "../env";
+import { readLiveSnapshot } from "../live-snapshot";
 import { parseRange } from "../range";
 import { type Chrome, htmlDoc, shell } from "../render/layout";
 import { liveScript } from "../render/live";
@@ -98,9 +99,14 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
     if (!site) return onNoSite(sites);
 
     const ch: Chrome = { surface: "app", view, site, sites, token: "", rangeKey: range.key };
+    // Only the Overview shows online-now, so only it pays for the DO read. A failed
+    // read still renders the (zero) compartment: the /live socket fills it in.
+    const live =
+      view === "overview"
+        ? ((await readLiveSnapshot(c.env, site.id)) ?? { visitors: 0, topPages: [] })
+        : null;
     const body =
-      (await content({ db: c.env.DB, site, range, nonce, ch, online: null })) +
-      liveScript(site.id, nonce);
+      (await content({ db: c.env.DB, site, range, nonce, ch, live })) + liveScript(site.id, nonce);
 
     return c.html(htmlDoc(title(site), shell(ch, body), nonce));
   };

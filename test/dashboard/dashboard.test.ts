@@ -473,24 +473,45 @@ describe("auth gating", () => {
 // ---------------------------------------------------------------------------
 
 describe("stat-card labels", () => {
-  it("renders the 'Single-Page Visits' label, not 'Bounce Rate'", async () => {
+  it("does not show single-page visits (or a bounce rate) on the overview", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("Single-Page Visits");
+    expect(text).not.toContain("Single-Page Visits");
+    expect(text).not.toMatch(/single-page visits/i);
     expect(text).not.toContain("Bounce Rate");
   });
 
-  it("footnotes the imprecise metrics with an honest caveat tooltip", async () => {
+  it("footnotes the visitors figure with an honest caveat", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    // Visitors is a sum of daily uniques across the range — the caveat must say so.
-    expect(text).toContain("counted once per day");
-    // Single-Page Visits is estimated, not measured per-session.
-    expect(text).toContain("Approximate. Estimated from pageviews and visitors");
+    // Visitors is a sum of daily uniques across the range — the note must say so.
+    expect(text).toContain('id="fn-1"');
+    expect(text).toContain("Visitors is the sum of each day");
+  });
+
+  it("notes a table whose visitor column sums above the site total", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // MOCK_BREAKDOWN's visitors sum to exactly the site's 1,200: no note.
+    expect(text).not.toContain("The visitor column adds up to");
+
+    vi.mocked(queries.getTopPages).mockResolvedValue([
+      ...MOCK_BREAKDOWN,
+      { label: "/docs", pageviews: 500, visitors: 300, share: 0.1, sampled: false },
+    ]);
+    const { text: over } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // 800 + 400 + 300 = 1,500 > 1,200 — once, for the pages table only.
+    expect(over).toContain("The visitor column adds up to 1,500, more than the site");
+    expect(over.match(/The visitor column adds up to/g)).toHaveLength(1);
+    expect(over).toContain('href="#fn-1"');
   });
 });
 
@@ -555,17 +576,13 @@ describe("CSP nonce", () => {
     expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
   });
 
-  it("chart metric toggle is wired via addEventListener, not blocked inline onclick", async () => {
+  it("carries no inline event-handler attributes (strict CSP would block them)", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    // Strict CSP (no script-src-attr) blocks inline handlers, so the toggle must
-    // not rely on them — otherwise "Visitors vs Pageviews" silently does nothing.
-    expect(text).not.toMatch(/onclick="setMetric/);
-    expect(text).not.toMatch(/onmouseleave=/);
-    expect(text).toContain("getElementById('btn-visitors').addEventListener('click'");
-    expect(text).toContain("getElementById('btn-pageviews').addEventListener('click'");
+    // No script-src-attr: an on* attribute would silently do nothing.
+    expect(text).not.toMatch(/\son[a-z]+=/i);
   });
 });
 
@@ -721,22 +738,23 @@ describe("no-sites empty state", () => {
 // ---------------------------------------------------------------------------
 
 describe("sampled data badge", () => {
-  it("shows ~est badge when cards.sampled is true", async () => {
+  it("marks estimates with ≈ and a notice when cards.sampled is true", async () => {
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: true });
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("~est");
+    expect(text).toContain("Some of this range is estimated.");
+    expect(text).toMatch(/≈|&asymp;/);
   });
 
-  it("does NOT show ~est badge when cards.sampled is false", async () => {
+  it("shows no estimate notice when cards.sampled is false", async () => {
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: false });
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).not.toContain("~est");
+    expect(text).not.toContain("Some of this range is estimated.");
   });
 });
 
@@ -1033,8 +1051,8 @@ describe("live top-pages panel", () => {
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("Active pages right now");
-    expect(text).toContain('id="live-pages-list"');
+    expect(text).toContain("Active pages");
+    expect(text).toContain('id="live-pages"');
   });
 
   it("live script consumes topPages and builds DOM safely (no innerHTML)", async () => {

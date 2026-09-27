@@ -20,11 +20,21 @@ import {
   getTopUtmMediums,
   getTopUtmSources,
 } from "../db/queries";
-import type { SiteRow } from "../shared/types";
+import type { BreakdownRow, SiteRow } from "../shared/types";
 import type { parseRange } from "./range";
-import { statCardsHtml, timeSeriesChartHtml } from "./render/charts";
+import { atlas } from "./render/atlas";
+import { bdTable, miniTable } from "./render/breakdown";
 import { esc, fmtNum, jsonForScript } from "./render/html";
-import { type Chrome, pageHead } from "./render/layout";
+import { type Chrome, pageHead, viewHref } from "./render/layout";
+import {
+  headline,
+  headlineSentence,
+  type LiveView,
+  readout,
+  sampledNotice,
+  trafficConsole,
+  visitorsNote,
+} from "./render/overview";
 import { breakdownCard, breakdownTable } from "./render/tables";
 
 export type RangeInfo = ReturnType<typeof parseRange>;
@@ -38,7 +48,7 @@ export interface ViewCtx {
   /** The page shell's view of this request (surface, hrefs). */
   ch: Chrome;
   /** Server-side online-now snapshot; null when it could not be read. */
-  online: number | null;
+  live: LiveView | null;
 }
 
 export interface BreakdownView {
@@ -52,43 +62,72 @@ export interface BreakdownView {
 }
 
 /**
- * Overview body shared by /app and /share/:token. The authed variant appends
- * the live active-pages panel (it has a WebSocket to fill it); the public one
- * never does (ADR-0012: no public WebSocket).
+ * Overview body shared by /app and /share/:token. Both show the online-now
+ * count from the server-side snapshot; only the authed surface lists active
+ * pages and connects the live socket (ADR-0012: no public WebSocket, no
+ * per-page live detail in public).
  */
 export async function overviewContent(ctx: ViewCtx, opts: { share: boolean }): Promise<string> {
-  const { db, site, range, nonce } = ctx;
-  const [cards, series, topPages, topSources, topCountries] = await Promise.all([
-    getStatCards(db, site.id, range),
-    getTimeSeries(db, site.id, range),
-    getTopPages(db, site.id, range, 5),
-    getTopSources(db, site.id, range, 5),
-    getTopCountries(db, site.id, range, 5),
-  ]);
+  const { db, site, range, ch, live } = ctx;
+  const [cards, series, topPages, topSources, topCountries, devices, browsers, oses] =
+    await Promise.all([
+      getStatCards(db, site.id, range),
+      getTimeSeries(db, site.id, range),
+      getTopPages(db, site.id, range, 6),
+      getTopSources(db, site.id, range, 6),
+      getTopCountries(db, site.id, range, 8),
+      opts.share ? [] : getTopDevices(db, site.id, range, 5),
+      opts.share ? [] : getTopBrowsers(db, site.id, range, 5),
+      opts.share ? [] : getTopOperatingSystems(db, site.id, range, 5),
+    ]);
 
-  const livePanel = opts.share
+  const siteTotals = {
+    visitors: cards.visitors,
+    pageviews: cards.pageviews,
+    sampled: cards.sampled,
+  };
+  const compact = (caption: string, labelHead: string, rows: BreakdownRow[], mono = false) =>
+    bdTable({
+      caption,
+      labelHead,
+      rows,
+      mono,
+      columns: [
+        { key: "visitors", label: "Visitors" },
+        { key: "pageviews", label: "Pageviews" },
+      ],
+      orderBy: "pageviews",
+      site: siteTotals,
+      foot: "whole",
+    });
+  const more = (id: string, label: string) =>
+    `<a class="more" href="${viewHref(ch, id)}">${label} <span aria-hidden="true">&rarr;</span></a>`;
+
+  const devicesSec = opts.share
     ? ""
-    : `<div style="background:#12151d;border:1px solid #20252f;border-radius:12px;padding:20px 22px;margin-top:14px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;">
-        <span class="live-dot" style="width:7px;height:7px;border-radius:50%;background:#2bd888;"></span>
-        <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14.5px;color:#fff;">Active pages right now</h2>
-      </div>
-      <ul id="live-pages-list" aria-live="polite" style="display:flex;flex-direction:column;gap:13px;">
-        <li style="color:#8b92a4;font-size:13px;">Waiting for live data&hellip;</li>
-      </ul>
-    </div>`;
+    : `<section class="sec devs" aria-labelledby="dev-h">
+      <div class="sec-h"><h2 id="dev-h">Devices</h2>${more("devices", "Details")}</div>
+      <div class="dgrid">${miniTable("Device type", devices, cards.sampled)}${miniTable("Browser", browsers, cards.sampled)}${miniTable("Operating system", oses, cards.sampled)}</div>
+    </section>`;
 
-  const online = ctx.online === null ? "" : `${ctx.online} online now`;
   return `
-    ${pageHead("Overview", range, online)}
-    ${statCardsHtml(cards, cards.sampled)}
-    ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
-    <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
-      ${breakdownCard("Top pages", topPages, "#4d86ff")}
-      ${breakdownCard("Top sources", topSources, "#7a5cff")}
+    ${sampledNotice(cards.sampled)}
+    ${headline("Overview", range, headlineSentence(cards, topSources, topCountries), live)}
+    ${readout(cards, series)}
+    ${trafficConsole(series, range.label, live, opts)}
+    ${visitorsNote(range.label)}
+    <div class="pair sec">
+      <section aria-labelledby="pages-h">
+        <div class="sec-h"><h2 id="pages-h">Top pages</h2>${more("pages", "All pages")}</div>
+        ${compact("Top pages", "Page", topPages, true)}
+      </section>
+      <section aria-labelledby="src-h">
+        <div class="sec-h"><h2 id="src-h">Top sources</h2>${more("sources", "All sources")}</div>
+        ${compact("Top sources", "Source", topSources)}
+      </section>
     </div>
-    ${breakdownCard("Top countries", topCountries, "#2bd888")}
-    ${livePanel}
+    <div class="sec">${atlas(topCountries, { sampled: cards.sampled, more: opts.share ? undefined : viewHref(ch, "geography") })}</div>
+    ${devicesSec}
   `;
 }
 

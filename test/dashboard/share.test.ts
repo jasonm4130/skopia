@@ -16,6 +16,7 @@
  */
 
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { parse } from "node-html-parser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BreakdownRow, SiteRow, StatCards, TimeSeriesPoint } from "../../src/shared/types";
@@ -146,9 +147,9 @@ describe("GET /share/:token", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type") ?? "").toMatch(/text\/html/);
     expect(text).toContain("test.dev");
-    // fmtNum(1200) = "1.2K", fmtNum(5000) = "5K" — stat cards from mock data.
-    expect(text).toContain("1.2K");
-    expect(text).toContain("5K");
+    // The readout prints whole numbers — visitors and pageviews from mock data.
+    expect(text).toContain("1,200");
+    expect(text).toContain("5,000");
 
     const csp = res.headers.get("content-security-policy") ?? "";
     const headerNonce = csp.match(/'nonce-([a-f0-9]+)'/)?.[1];
@@ -459,7 +460,37 @@ describe("GET /share/:token — read-through cache + online-now (Task 2)", () =>
 
     const { res, text } = await fetch_(req(`/share/${token}`));
     expect(res.status).toBe(200);
-    expect(text).toContain("7 online now");
+    const root = parse(text);
+    // Above zero: the full compartment, the lime (non-zero) figure, no idle strip.
+    expect(root.querySelector("#live .live-full [data-odo]")?.text).toBe("7");
+    expect(root.querySelector("#live")?.classList.contains("is-zero")).toBe(false);
+    expect(root.querySelector("#live .live-full [data-odo]")?.classList.contains("zero")).toBe(
+      false,
+    );
+    expect(root.querySelector(".console")?.classList.contains("idle")).toBe(false);
+    expect(root.querySelector("#live-say")?.text).toBe("7 visitors online now");
+    // ADR-0012: the public page never opens the WebSocket.
+    expect(text).not.toContain("/live?");
+    expect(text).not.toContain("dash-live.js");
+  });
+
+  it("at zero online collapses to the grey one-line strip", async () => {
+    const token = `shr_${"g".repeat(43)}`;
+    useSite("site-live-zero", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => ({
+      visitors: 0,
+      topPages: [],
+    }));
+
+    const { text } = await fetch_(req(`/share/${token}`));
+    const root = parse(text);
+    expect(root.querySelector("#live")?.classList.contains("is-zero")).toBe(true);
+    expect(root.querySelector(".console")?.classList.contains("idle")).toBe(true);
+    // The figure is grey at zero: every odometer carries the zero class.
+    const odos = root.querySelectorAll("#live [data-odo]");
+    expect(odos.length).toBeGreaterThan(0);
+    for (const o of odos) expect(o.classList.contains("zero")).toBe(true);
+    expect(root.querySelector(".live-strip")?.text).toContain("0 online now · last 5 minutes");
   });
 
   it("degrades to 200 with no online-now badge when the snapshot RPC throws", async () => {

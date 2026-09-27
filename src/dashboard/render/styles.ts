@@ -306,6 +306,8 @@ sup.fn a:hover{color:var(--ink)}
 .bd tfoot th{text-align:left;padding-left:0}
 .bd tfoot td.v{color:var(--ink-2);font-weight:500}
 .bd tfoot tr+tr>*{padding-top:4px}
+.bd .ast{text-decoration:none;color:var(--ink-3);margin-left:1px}
+.bd .ast:hover{color:var(--ink)}
 .bd-none{padding:22px 0;border-top:2px solid var(--ink);color:var(--ink-3);font-size:14.5px;line-height:1.55}
 .bd-none code{color:var(--ink)}
 .bd-note{margin-top:10px;font-size:13.5px;line-height:1.5;color:var(--ink-3)}
@@ -328,8 +330,8 @@ sup.fn a:hover{color:var(--ink)}
 .m-k{width:8px;height:8px;border-radius:50%}
 .m-k1{background:#7a857b}.m-k2{background:#bcc5b9}.m-k3{background:#f4f8f0}
 .atlas-list{border-left:1px solid var(--disp-rule);padding:20px 22px 16px;background:var(--disp-2);min-width:0}
-.atlas-list h3{font-size:14px;font-weight:500;color:var(--disp-ink-2);letter-spacing:0;padding-bottom:8px;border-bottom:1px solid var(--disp-rule);display:flex;justify-content:space-between}
-.atlas-list h3 .srt{color:var(--disp-ink)}
+.atlas-list .atlas-lh{font-size:14px;font-weight:500;color:var(--disp-ink-2);letter-spacing:0;padding-bottom:8px;border-bottom:1px solid var(--disp-rule);display:flex;justify-content:space-between}
+.atlas-list .atlas-lh .srt{color:var(--disp-ink)}
 .atlas-list li{position:relative;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--disp-rule);font-size:14.5px}
 .atlas-list li::after{content:"";position:absolute;left:0;bottom:-1px;height:2px;width:100%;background:var(--disp-ink-3);transform:scaleX(var(--s));transform-origin:left}
 .atlas-list .cc{font:500 12.5px var(--mono);color:var(--disp-ink)}

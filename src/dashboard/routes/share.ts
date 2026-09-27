@@ -5,8 +5,9 @@
 
 import type { Context, Hono } from "hono";
 import { getSiteByPublicToken } from "../../db/queries";
-import type { LiveSnapshot, SiteRow } from "../../shared/types";
+import type { SiteRow } from "../../shared/types";
 import type { DashEnv } from "../env";
+import { readLiveSnapshot } from "../live-snapshot";
 import { parseRange, todayUtc } from "../range";
 import { type Chrome, htmlDoc, shell } from "../render/layout";
 import { BREAKDOWN_VIEWS, breakdownPage, overviewContent, type ViewCtx } from "../views";
@@ -101,7 +102,7 @@ function buildPublicResponse(page: CachedPublicPage): Response {
  * never re-run D1.
  *
  * On a full miss it reads the live-visitor count once (a single `SITE_LIVE`
- * `snapshot()` RPC, best-effort: a DO failure degrades to no badge, never a
+ * `snapshot()` RPC, best-effort: a DO failure degrades to no online-now compartment, never a
  * 500), renders, then writes both tiers via `waitUntil` so the response is not
  * held on the cache write.
  *
@@ -135,24 +136,13 @@ async function cachedPublicResponse(
 
   // Full miss: read the live count once, best-effort. A DO failure must degrade
   // to no badge, never a 500 — the count is a nicety, the page is the product.
-  let onlineCount: number | null = null;
   // Segment 2 of share:v1:{site_id}:{view}:{range}:{day}.
   // ponytail: assumes site ids carry no ':' (the WAE-index slug convention);
   // pass the site id as its own arg if that ever stops holding.
   const siteId = cacheKey.split(":")[2];
-  if (siteId) {
-    try {
-      const ns = c.env.SITE_LIVE;
-      const stub = ns.get(ns.idFromName(siteId)) as unknown as {
-        snapshot(): Promise<LiveSnapshot>;
-      };
-      onlineCount = (await stub.snapshot()).visitors;
-    } catch {
-      onlineCount = null;
-    }
-  }
-
-  const page = await render(onlineCount);
+  const snap = siteId ? await readLiveSnapshot(c.env, siteId) : null;
+  // The public page shows the count only — never which pages are active.
+  const page = await render(snap === null ? null : snap.visitors);
   const res = buildPublicResponse(page);
 
   c.executionCtx.waitUntil(c.env.CACHE.put(cacheKey, JSON.stringify(page), { expirationTtl: ttl }));
@@ -221,7 +211,8 @@ export function registerShareRoutes(dashboard: Hono<DashEnv>): void {
     return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
       const nonce = crypto.randomUUID().replace(/-/g, "");
       const ch: Chrome = { surface: "share", view, site, sites: [], token, rangeKey: range.key };
-      const body = await content({ db: c.env.DB, site, range, nonce, ch, online: onlineCount });
+      const live = onlineCount === null ? null : { visitors: onlineCount, topPages: [] };
+      const body = await content({ db: c.env.DB, site, range, nonce, ch, live });
       const html = htmlDoc(title(site), shell(ch, body), nonce);
       return { html, nonce };
     });

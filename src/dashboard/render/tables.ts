@@ -1,8 +1,19 @@
 /** Skopia — breakdown renderers: the compact bar-list card and the full table. */
 
 import type { BreakdownRow } from "../../shared/types";
-import { sampledBadge, VISITORS_TOOLTIP } from "./charts";
 import { esc, fmtNum, fmtPct } from "./html";
+
+// Shared with the breakdown table's Visitors column header — same caveat,
+// same wording, wherever a "Visitors" figure is a sum of daily uniques.
+const VISITORS_TOOLTIP =
+  "Sum of each day's unique visitors. Someone who visits on several days is counted once per day, so multi-day totals run higher than true unique visitors.";
+
+/** The "~est" badge for a metric derived from sampled (not exact) data. */
+function sampledBadge(sampled: boolean): string {
+  return sampled
+    ? `<span title="Estimated from sampled data" style="font-size:10px;color:#9aa1b2;background:#1a1f2a;padding:2px 6px;border-radius:4px;margin-left:6px;">~est</span>`
+    : "";
+}
 
 // ---------------------------------------------------------------------------
 // Breakdown bar-list HTML (top pages, sources, countries)

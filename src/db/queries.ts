@@ -150,8 +150,15 @@ export async function getTimeSeries(
 // Breakdown ("top N") tables
 // ---------------------------------------------------------------------------
 
+/** Which column a breakdown's top-N is ranked by. */
+export type BreakdownOrder = "pageviews" | "visitors";
+
 /**
- * Generic top-N breakdown for one dimension over a window, ordered by pageviews.
+ * Generic top-N breakdown for one dimension over a window, ordered by
+ * pageviews (default) or visitors. A panel that shows only a Visitors column
+ * must rank by visitors, or its visible order would contradict its numbers
+ * (and the LIMIT would cut the wrong rows). Ties fall back to the other column.
+ * `share` is always the row's share of all pageviews, whatever the order.
  */
 export async function getBreakdown(
   db: D1Database,
@@ -159,6 +166,7 @@ export async function getBreakdown(
   range: DateRange,
   dimension: RollupDimension,
   limit: number,
+  orderBy: BreakdownOrder = "pageviews",
 ): Promise<BreakdownRow[]> {
   // Get the total pageviews for the window (for share calculation)
   const totalRow = await db
@@ -180,7 +188,7 @@ export async function getBreakdown(
        FROM rollup_daily
        WHERE site_id = ? AND dimension = ? AND day >= ? AND day <= ?
        GROUP BY dim_value
-       ORDER BY pageviews DESC
+       ORDER BY ${orderBy === "visitors" ? "visitors DESC, pageviews DESC" : "pageviews DESC, visitors DESC"}
        LIMIT ?`,
     )
     .bind(siteId, dimension, range.from, range.to, limit)
@@ -215,44 +223,44 @@ export async function getTopSources(
   return getBreakdown(db, siteId, range, "referrer", limit);
 }
 
-/** Top countries (dimension = "country"). */
+/** Top countries (dimension = "country"), ranked by visitors (the panel shows only Visitors). */
 export async function getTopCountries(
   db: D1Database,
   siteId: string,
   range: DateRange,
   limit: number,
 ): Promise<BreakdownRow[]> {
-  return getBreakdown(db, siteId, range, "country", limit);
+  return getBreakdown(db, siteId, range, "country", limit, "visitors");
 }
 
-/** Device-class breakdown (dimension = "device"). */
+/** Device-class breakdown (dimension = "device"), ranked by visitors. */
 export async function getTopDevices(
   db: D1Database,
   siteId: string,
   range: DateRange,
   limit: number,
 ): Promise<BreakdownRow[]> {
-  return getBreakdown(db, siteId, range, "device", limit);
+  return getBreakdown(db, siteId, range, "device", limit, "visitors");
 }
 
-/** Browser breakdown (dimension = "browser"). */
+/** Browser breakdown (dimension = "browser"), ranked by visitors. */
 export async function getTopBrowsers(
   db: D1Database,
   siteId: string,
   range: DateRange,
   limit: number,
 ): Promise<BreakdownRow[]> {
-  return getBreakdown(db, siteId, range, "browser", limit);
+  return getBreakdown(db, siteId, range, "browser", limit, "visitors");
 }
 
-/** OS breakdown (dimension = "os"). */
+/** OS breakdown (dimension = "os"), ranked by visitors. */
 export async function getTopOperatingSystems(
   db: D1Database,
   siteId: string,
   range: DateRange,
   limit: number,
 ): Promise<BreakdownRow[]> {
-  return getBreakdown(db, siteId, range, "os", limit);
+  return getBreakdown(db, siteId, range, "os", limit, "visitors");
 }
 
 /** UTM-source breakdown (dimension = "utm_source"). */
