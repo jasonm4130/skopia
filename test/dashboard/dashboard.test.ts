@@ -821,6 +821,66 @@ describe("breakdown table honesty (Task 9)", () => {
 // collector folds same-site referrers into (direct) only when it is set.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Breakdown headlines: below the 50-row limit the rows cover the site, so the
+// sentence uses the site total; at the limit it says "X of Y" with X the rows' own sum.
+// ---------------------------------------------------------------------------
+
+describe("breakdown headline at and under the row limit", () => {
+  const fifty = (prefix: string): BreakdownRow[] =>
+    Array.from({ length: 50 }, (_, i) => ({
+      label: `${prefix}${i}`,
+      pageviews: 60 - i,
+      visitors: 1,
+      share: (60 - i) / 5000,
+      sampled: false,
+    }));
+  // 60 + 59 + … + 11 = 1,775 of the site's 5,000.
+  const SUM = "1,775";
+
+  it("pages under the limit: 'N pages drew <site total> pageviews'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      "2 pages drew 5,000 pageviews.",
+    );
+  });
+
+  it("pages at the limit: 'The top 50 pages drew X of Y pageviews'", async () => {
+    vi.mocked(queries.getTopPages).mockResolvedValue(fifty("/p"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      `The top 50 pages drew ${SUM} of 5,000 pageviews.`,
+    );
+  });
+
+  it("sources under the limit: 'N sources sent <site total> pageviews'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      "2 sources sent 5,000 pageviews.",
+    );
+  });
+
+  it("sources at the limit: 'The top 50 sources sent X of Y pageviews'", async () => {
+    vi.mocked(queries.getTopSources).mockResolvedValue(fifty("s"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      `The top 50 sources sent ${SUM} of 5,000 pageviews.`,
+    );
+  });
+});
+
 describe("sources (direct) definition", () => {
   const DIRECT: BreakdownRow = {
     label: "(direct)",

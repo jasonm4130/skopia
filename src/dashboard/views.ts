@@ -145,6 +145,24 @@ function counted(rows: BreakdownRow[], limit: number, one: string, many: string)
 }
 
 /**
+ * "4 pages drew 28 pageviews" — or, once the query hit its row limit, "The top
+ * 50 pages drew 940 of 1,210 pageviews": the rows no longer cover the site, so
+ * the figure is their own sum, set against the site total.
+ */
+function drewPageviews(
+  rows: BreakdownRow[],
+  limit: number,
+  noun: [string, string],
+  verb: string,
+  total: number,
+): string {
+  if (rows.length < limit)
+    return `${counted(rows, limit, ...noun)} ${verb} ${plural(total, "pageview", "pageviews")}`;
+  const sum = rows.reduce((a, r) => a + r.pageviews, 0);
+  return `${counted(rows, limit, ...noun)} ${verb} ${n(sum)} of ${plural(total, "pageview", "pageviews")}`;
+}
+
+/**
  * The leader of a list ordered by `key`, phrased with a tie check:
  * "<b>/</b> drew the most", "<b>a</b> and <b>b</b> tie", "3 pages tie".
  */
@@ -210,7 +228,7 @@ export const BREAKDOWN_VIEWS: BreakdownView[] = [
       const say =
         cards.pageviews === 0 || !top
           ? "No pageviews in this range yet."
-          : `${counted(rows, 50, "page", "pages")} drew ${plural(cards.pageviews, "pageview", "pageviews")}. ${top.text} ${top.tie ? "tie for" : "drew"} the most: ${pct(rows[0]?.share ?? 0)} of them${top.tie ? " each" : ""}.`;
+          : `${drewPageviews(rows, 50, ["page", "pages"], "drew", cards.pageviews)}. ${top.text} ${top.tie ? "tie for" : "drew"} the most: ${pct(rows[0]?.share ?? 0)} of them${top.tie ? " each" : ""}.`;
       return {
         say,
         body: `${sampledNotice(cards.sampled)}
@@ -254,7 +272,7 @@ export const BREAKDOWN_VIEWS: BreakdownView[] = [
       const say =
         cards.pageviews === 0 || !top
           ? "No pageviews in this range yet."
-          : `${counted(rows, 50, "source", "sources")} sent ${plural(cards.pageviews, "pageview", "pageviews")}. ${top.text} ${top.tie ? "tie for" : "brought"} the most: ${pct(rows[0]?.share ?? 0)} of them${top.tie ? " each" : ""}.`;
+          : `${drewPageviews(rows, 50, ["source", "sources"], "sent", cards.pageviews)}. ${top.text} ${top.tie ? "tie for" : "brought"} the most: ${pct(rows[0]?.share ?? 0)} of them${top.tie ? " each" : ""}.`;
 
       // The collector folds same-site referrers into (direct) only when the
       // site has a domain set (src/collector/index.ts); without one, clicks
