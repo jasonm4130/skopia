@@ -7,9 +7,9 @@
  * and only for live data that is above zero.
  *
  * This file is NOT imported by the Worker (Workers don't serve CSS from
- * `src/`). The dashboard's stylesheet (src/dashboard/render/styles.ts) and the
- * marketing site (skopia-www) mirror these values. When a token changes, edit it
- * HERE first, then update both copies.
+ * `src/`). The dashboard's stylesheet (src/dashboard/render/styles.ts) mirrors
+ * these values: when a token changes, edit it HERE first, then update that copy.
+ * skopia-www no longer copies this file (ADR-0009 amendment, 2026-09-27).
  */
 
 :root {
