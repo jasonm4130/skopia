@@ -49,9 +49,11 @@ Understanding the design helps you report meaningful issues.
   HMAC-signed cookies** (`AUTH_COOKIE_SECRET`) — there is no server-side session
   store to leak.
 - **Cookieless visitor identity.** Visitor IDs are a daily-salted HMAC over
-  `(salt, ip, ua, site_id)`. The raw IP is never persisted, and each day's salt
-  expires via KV TTL anchored to that day's boundary (~1 h after UTC midnight),
-  preventing cross-day correlation. See [docs/privacy.md](./docs/privacy.md).
+  `(salt, ip, ua, site_id)`. The raw IP is never persisted, and each site's daily
+  salt is held by that site's Durable Object and deleted ~10 min after its UTC day
+  ends, preventing cross-day correlation (deleted salts stay recoverable via
+  point-in-time recovery for 30 days by someone with deploy access — ADR-0013 §7).
+  See [docs/privacy.md](./docs/privacy.md).
 - **Content Security Policy.** Every response carries a CSP nonce with
   `'strict-dynamic'`; there are no inline scripts without a nonce. Authenticated
   pages use a per-request nonce; cached public `/share` pages use a per-cache-entry

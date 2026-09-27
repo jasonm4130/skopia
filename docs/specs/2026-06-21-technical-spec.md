@@ -48,8 +48,8 @@ or the $5/mo Workers Paid base**.
   │ 4. enrich from request.cf (country, colo, asn, httpProtocol, …) — 0 B │
   │    on client; UA-parse → device class / browser / OS                  │
   │ 5. identity: HMAC-SHA256(dailySalt ‖ ip ‖ ua ‖ site_id) → 16-hex vid  │
-  │    (raw IP NEVER persisted; salt rotated daily in KV at UTC midnight) │
-  │ 6. env.WAE.writeDataPoint({...})        ← raw event (synchronous)      │
+  │    (raw IP NEVER persisted; per-site daily salt in the SiteLive DO)   │
+  │ 6. env.WAE.writeDataPoint({...})        ← raw event (in waitUntil)     │
   │ 7. ctx.waitUntil( SITE_DO.fetch('/hit', {vid}) )  ← live count, async │
   │ 8. respond 204 (beacon does not block on step 7)                      │
   └───────┬──────────────────────────────────────┬───────────────────────┘
@@ -84,6 +84,9 @@ or the $5/mo Workers Paid base**.
 ```
 
 > Superseded in part by ADR-0012: `/public/<token>` above was replaced by `/share/:token`.
+>
+> Amended by ADR-0013: the 204 is sent after step 4; steps 5–7 run in one `ctx.waitUntil`
+> task, and the daily salt is per-site, owned by the `SiteLive` DO (no KV, no Cron).
 
 ---
 
@@ -142,15 +145,22 @@ A single Worker on a route like `collect.<deploy-domain>` (or the user's own dom
 4. **Enrich** from `request.cf`: `country`, `colo`, `asn`, `asOrganization`, `httpProtocol`,
    `isEUCountry`. Parse `User-Agent` → device class / browser / OS (small server-side table).
 5. **Cookieless identity:** `vid = HMAC-SHA256(dailySalt ‖ clientIP ‖ UA ‖ site_id)` truncated to
-   16 hex chars. **Raw IP is never written anywhere.** The daily salt lives in KV, rotated at UTC
-   midnight by the Cron Worker; yesterday's salt is deleted, making cross-day correlation
-   impossible. This yields **daily uniques without a cookie** (a returning visitor across a UTC
-   boundary counts new — the accepted privacy/accuracy trade, documented honestly). See ADR-0002.
-6. **Write to WAE** synchronously via `env.WAE.writeDataPoint(...)` (§4 schema). One data point
-   per event. This is well inside the 250-dp/invocation limit (we write 1).
-7. **Bump live count** via `ctx.waitUntil(env.SITE_LIVE.get(idFromName(site_id)).fetch('/hit'))`
-   — async, does not block the beacon response.
-8. **Respond `204`.**
+   16 hex chars. **Raw IP is never written anywhere.** The daily salt is per-site, created on
+   first use by the site's `SiteLive` DO (`getSalt(day)`, memoized per isolate) and deleted by the
+   DO alarm ~10 min after its UTC day ends, making cross-day correlation impossible (ADR-0013;
+   deleted salts stay operator-recoverable via PITR for 30 days, §7 there). `day` is computed
+   once at receipt and also keys the WAE row (blob14) and the DO rollup bucket. This yields
+   **daily uniques without a cookie** (a returning visitor across a UTC boundary counts new — the
+   accepted privacy/accuracy trade, documented honestly). See ADR-0002.
+6. **Write to WAE** via `env.WAE.writeDataPoint(...)` (§4 schema). One data point per event. This
+   is well inside the 250-dp/invocation limit (we write 1).
+7. **Bump the SiteLive DO** (`POST /event`: live count + rollup).
+8. **Respond `204`.** Since ADR-0013 the 204 goes out once validation, the bot drop, the site and
+   origin checks and the secret guard have passed; steps 5–7 then run in one `ctx.waitUntil`
+   task. The WAE write is therefore **no longer synchronous**: a Worker crash or `waitUntil`
+   cancellation after the 204 can lose the WAE point too (accepted). If the salt fetch fails
+   (error, `.overloaded`, or a 5 s timeout), the WAE point is still written with `vid = ""` and the
+   DO step is skipped.
 
 **Queues are OUT of the default path** (ADR-0002 / PM Q4). At self-host volumes the direct
 WAE write is simpler and free; Queues' 3-operations-per-message billing makes them the dominant
@@ -167,8 +177,8 @@ Five primitives, each doing exactly one job:
 |---|---|---|
 | **WAE** | raw event ingest + ad-hoc query | purpose-built high-cardinality time-series, cheap writes, no per-dimension cost, SQL read. D1 cannot take raw ingest (single-threaded). |
 | **D1** | site/user/config metadata + **exact rollups** + goal defs | relational, rich SQL, cheap reads; written by Cron not by the hot path. |
-| **Durable Object** | per-site **live visitor** count + coordination | the only primitive with strongly-consistent per-key in-memory state + WebSockets. |
-| **KV** | cached dashboard responses + **daily salt** | global <10 ms reads; salt needs a tiny rotating store. (Cache API is ruled out — per-PoP and disabled behind Access; ADR-0003.) |
+| **Durable Object** | per-site **live visitor** count + coordination + **daily salt** (ADR-0013) | the only primitive with strongly-consistent per-key in-memory state + WebSockets; a synchronous get-or-create gives exactly one salt per site per day. |
+| **KV** | cached dashboard responses | global <10 ms reads. (Cache API is ruled out — per-PoP and disabled behind Access; ADR-0003.) The salt moved to the DO in ADR-0013: KV has no atomic get-or-create. |
 | **R2 / Pipelines** | **NOT in MVP** — opt-in cold archival beyond 90 days | only needed if a user wants >3-month retention (ADR-0003 / PM Q2). |
 
 ### 4.1 WAE data-point schema (per event)
@@ -181,7 +191,8 @@ doubles, 1 index, ≤ 16 KB blobs, ≤ 96-byte index (all live-verified 2026-06-
 indexes: [ site_id ]                         // 1 index, ≤96 B — the partition key
 
 blobs (strings, ≤16 KB total):
-  blob1  = vid              // 16-hex cookieless daily visitor hash
+  blob1  = vid              // 16-hex cookieless daily visitor hash; '' if the salt fetch
+                            // failed (ADR-0013 §4) — visitor recomputes exclude blob1 = ''
   blob2  = pathname         // normalized page path  (top pages)
   blob3  = referrer_host    // parsed referrer hostname (sources)
   blob4  = utm_source       // sources / campaigns
@@ -194,7 +205,9 @@ blobs (strings, ≤16 KB total):
   blob11 = event_name       // '' for pageview, name for custom event/goal
   blob12 = entry_path       // for future funnels/landing (cheap to store now)
   blob13 = props_json       // small JSON for custom-event props (capped)
-  // blob14..20 reserved (Web Vitals, outbound link target, etc. — fast-follow)
+  blob14 = event_day        // collector's designated UTC day (ADR-0013 §1a); a manual
+                            // recompute buckets by this, not by the write timestamp
+  // blob15..20 reserved (Web Vitals, outbound link target, etc. — fast-follow)
 
 doubles (numbers):
   double1 = 1               // event count (so SUM(_sample_interval*double1)=events)
@@ -269,7 +282,7 @@ serving everything possible from D1/KV.
 
 **KV, not the Cache API.** The Cache API is per-PoP *and* is disabled for Workers fronted by
 Cloudflare Access — and even though we choose self-rolled auth (ADR-0005), KV is the right call
-anyway: globally replicated, sub-10 ms, and it doubles as the daily-salt store. Dashboard JSON/
+anyway: globally replicated and sub-10 ms. (It no longer holds the daily salt — ADR-0013.) Dashboard JSON/
 HTML responses are cached in KV with a 60–120 s TTL, invalidated implicitly by TTL (the Cron
 refreshes D1 faster than the TTL, so staleness is bounded to one Cron interval + TTL).
 
@@ -431,10 +444,10 @@ plan.
     { "binding": "DB", "database_name": "skopia", "database_id": "<auto>" }
   ],
 
-  // Dashboard cache + rotating daily salt (auto-provisioned).
+  // Dashboard cache (auto-provisioned). The daily salt lives in the SiteLive DO
+  // (ADR-0013), not KV.
   "kv_namespaces": [
-    { "binding": "CACHE", "id": "<auto>" },
-    { "binding": "SALT",  "id": "<auto>" }
+    { "binding": "CACHE", "id": "<auto>" }
   ],
 
   // Per-site live visitor counts.
@@ -446,7 +459,7 @@ plan.
   ],
 
   // Cron: rollups every 5 min (finished days) — current-day refresh handled by a
-  // shorter-interval trigger or the live DO; salt rotation runs in the daily pass.
+  // shorter-interval trigger or the live DO. (Cron retired by ADR-0011.)
   "triggers": { "crons": ["*/5 * * * *"] },
 
   // Secrets (NOT committed) — set on first run / via deploy prompts:
