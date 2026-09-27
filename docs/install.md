@@ -10,7 +10,7 @@ from `wrangler.jsonc`:
 | Resource | How it's provisioned |
 |----------|----------------------|
 | D1 database | Auto-provisioned by the button |
-| KV namespaces (cache + salt) | Auto-provisioned by the button |
+| KV namespace (cache) | Auto-provisioned by the button |
 | Durable Object (SiteLive) | Provisioned via DO migration |
 | Workers Analytics Engine dataset | Created on first write — nothing to do |
 | Static assets (fonts, dashboard JS, map) | Shipped with the Worker — nothing to provision |
