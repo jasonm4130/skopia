@@ -25,7 +25,7 @@ export function countryName(code: string): string {
 // Three brightness steps relative to the busiest country.
 const bucket = (r: number): 1 | 2 | 3 => (r >= 0.66 ? 3 : r >= 0.33 ? 2 : 1);
 
-function worldMap(rows: BreakdownRow[]): string {
+export function worldMap(rows: BreakdownRow[]): string {
   const max = Math.max(1, ...rows.map((r) => r.visitors));
   const lit = rows
     .map((r) => {
