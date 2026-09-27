@@ -26,19 +26,20 @@
   "analytics_engine_datasets": [{ "binding": "WAE", "dataset": "skopia_events" }],
 
   // Relational metadata + exact daily rollups (written by the SiteLive DO, read
-  // by the dashboard). `database_id` is filled by `wrangler deploy` / the Deploy button.
+  // by the dashboard). No `database_id`: Wrangler's automatic provisioning creates
+  // the database on a fresh account and keeps an existing deploy's binding linked,
+  // so the committed config works for the Deploy button and for existing deploys.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "skopia",
-      "database_id": "placeholder-set-on-deploy",
       "migrations_dir": "migrations"
     }
   ],
 
   // CACHE = dashboard response cache (60-120 s TTL). The daily identity salt is
-  // NOT in KV: the SiteLive DO owns it (ADR-0013). `id` is filled on deploy.
-  "kv_namespaces": [{ "binding": "CACHE", "id": "placeholder-set-on-deploy" }],
+  // NOT in KV: the SiteLive DO owns it (ADR-0013). No `id`, for the same reason as D1.
+  "kv_namespaces": [{ "binding": "CACHE" }],
 
   // Per-site live visitor count, rollup and daily salt. One `SiteLive` instance
   // per site (`idFromName(site_id)`). SQLite-backed per current Cloudflare
