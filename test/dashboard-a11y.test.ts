@@ -404,6 +404,20 @@ describe("BASE_CSS utilities", () => {
     expect(css).toContain(".sr-only");
     expect(css).toContain("prefers-reduced-motion");
   });
+
+  it("reserves room under the fixed mobile tab bar so it never hides the footer", async () => {
+    const { root } = await render("/login");
+    const css = root.querySelector("style")?.text ?? "";
+    // Bar: 56px tabs + 1px top rule, plus the safe-area inset as its bottom padding.
+    const tab = Number(css.match(/\.tabbar a,\.tabbar summary\{[^}]*height:(\d+)px/)?.[1]);
+    expect(css).toMatch(/\.tabbar\{[^}]*padding:0 4px env\(safe-area-inset-bottom,0px\)/);
+    // Body: the same inset plus at least the bar's height.
+    const pad = css.match(
+      /body\{[^}]*padding-bottom:calc\(env\(safe-area-inset-bottom,0px\) \+ (\d+)px\)/,
+    );
+    expect(pad, "body padding-bottom covers the tab bar").toBeTruthy();
+    expect(Number(pad?.[1])).toBeGreaterThanOrEqual(tab + 1);
+  });
 });
 
 // ---------------------------------------------------------------------------
