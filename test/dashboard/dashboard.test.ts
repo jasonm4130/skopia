@@ -21,6 +21,7 @@
  */
 
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { parse } from "node-html-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -473,24 +474,45 @@ describe("auth gating", () => {
 // ---------------------------------------------------------------------------
 
 describe("stat-card labels", () => {
-  it("renders the 'Single-Page Visits' label, not 'Bounce Rate'", async () => {
+  it("does not show single-page visits (or a bounce rate) on the overview", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("Single-Page Visits");
+    expect(text).not.toContain("Single-Page Visits");
+    expect(text).not.toMatch(/single-page visits/i);
     expect(text).not.toContain("Bounce Rate");
   });
 
-  it("footnotes the imprecise metrics with an honest caveat tooltip", async () => {
+  it("footnotes the visitors figure with an honest caveat", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    // Visitors is a sum of daily uniques across the range — the caveat must say so.
-    expect(text).toContain("counted once per day");
-    // Single-Page Visits is estimated, not measured per-session.
-    expect(text).toContain("Approximate. Estimated from pageviews and visitors");
+    // Visitors is a sum of daily uniques across the range — the note must say so.
+    expect(text).toContain('id="fn-1"');
+    expect(text).toContain("Visitors is the sum of each day");
+  });
+
+  it("notes a table whose visitor column sums above the site total", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // MOCK_BREAKDOWN's visitors sum to exactly the site's 1,200: no note.
+    expect(text).not.toContain("The visitor column adds up to");
+
+    vi.mocked(queries.getTopPages).mockResolvedValue([
+      ...MOCK_BREAKDOWN,
+      { label: "/docs", pageviews: 500, visitors: 300, share: 0.1, sampled: false },
+    ]);
+    const { text: over } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    // 800 + 400 + 300 = 1,500 > 1,200 — once, for the pages table only.
+    expect(over).toContain("The visitor column adds up to 1,500, more than the site");
+    expect(over.match(/The visitor column adds up to/g)).toHaveLength(1);
+    expect(over).toContain('href="#fn-1"');
   });
 });
 
@@ -540,32 +562,29 @@ async function authedCookie(): Promise<string> {
 }
 
 describe("CSP nonce", () => {
-  it("authed /app inline <script> carries a nonce= attribute", async () => {
+  it("authed /app loads the live client as a nonced script, with no inline scripts", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Every inline <script> (no src) must be nonced for strict-dynamic CSP.
-    expect(text).toMatch(/<script nonce="[a-f0-9]+">/);
-    // No un-nonced inline script blocks.
-    expect(text).not.toMatch(/<script>\s*\n/);
+    // Scripts are static assets under the request nonce (strict-dynamic).
+    expect(text).toMatch(/<script src="\/assets\/dash-live\.js" nonce="[a-f0-9]+" defer>/);
+    expect(text).toContain('<body data-live-site="site-001">');
+    // No inline script blocks at all.
+    expect(text).not.toMatch(/<script(?![^>]*\ssrc=)[^>]*>/);
     // The CSP header from the root middleware advertises the same nonce.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toMatch(/script-src 'self' 'nonce-[a-f0-9]+' 'strict-dynamic'/);
   });
 
-  it("chart metric toggle is wired via addEventListener, not blocked inline onclick", async () => {
+  it("carries no inline event-handler attributes (strict CSP would block them)", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    // Strict CSP (no script-src-attr) blocks inline handlers, so the toggle must
-    // not rely on them — otherwise "Visitors vs Pageviews" silently does nothing.
-    expect(text).not.toMatch(/onclick="setMetric/);
-    expect(text).not.toMatch(/onmouseleave=/);
-    expect(text).toContain("getElementById('btn-visitors').addEventListener('click'");
-    expect(text).toContain("getElementById('btn-pageviews').addEventListener('click'");
+    // No script-src-attr: an on* attribute would silently do nothing.
+    expect(text).not.toMatch(/\son[a-z]+=/i);
   });
 });
 
@@ -590,9 +609,13 @@ describe("site switcher", () => {
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    expect(text).toContain('id="skopia-site-switcher"');
-    expect(text).toContain('<option value="site-001" selected>test.dev</option>');
-    expect(text).toContain('<option value="site-002">other.dev</option>');
+    // A <details> of plain links (no JS, no inline handlers); the current site
+    // is marked aria-current.
+    expect(text).toContain('id="site-switcher"');
+    expect(text).toContain(
+      '<a href="/app?site=site-001&range=30d" aria-current="true"><span>test.dev</span>',
+    );
+    expect(text).toContain('<a href="/app?site=site-002&range=30d"><span>other.dev</span>');
   });
 
   it("selects the site named by ?site= ", async () => {
@@ -602,8 +625,19 @@ describe("site switcher", () => {
       req("/app?site=site-002", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    expect(text).toContain('<option value="site-002" selected>other.dev</option>');
-    expect(text).toContain('<option value="site-001">test.dev</option>');
+    expect(text).toContain(
+      '<a href="/app?site=site-002&range=30d" aria-current="true"><span>other.dev</span>',
+    );
+    expect(text).toContain('<a href="/app?site=site-001&range=30d"><span>test.dev</span>');
+  });
+
+  it("switcher links keep the current view", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/sources?site=site-002&range=7d"');
   });
 
   it("redirects to /app (not the empty state) when ?site= names an unknown site but sites exist", async () => {
@@ -618,17 +652,68 @@ describe("site switcher", () => {
 });
 
 describe("range preservation across nav", () => {
-  it("sidebar nav links and the switcher carry the active range", async () => {
+  it("view tabs carry the active range; range keys keep the view and site", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
-      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      req("/app/pages?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Navigating Overview → Pages must keep range=7d.
-    expect(text).toContain('href="/app/pages?site=site-001&range=7d"');
+    // Navigating Pages → Sources must keep range=7d.
+    expect(text).toContain('href="/app?site=site-001&range=7d"');
     expect(text).toContain('href="/app/sources?site=site-001&range=7d"');
-    // The switcher remembers the range for its on-change navigation.
-    expect(text).toContain('data-range="7d"');
+    // The range keys are links on the current view.
+    expect(text).toContain('href="/app/pages?site=site-001&range=90d"');
+    expect(text).toContain('href="/app/pages?site=site-001&range=7d" aria-current="true"');
+  });
+});
+
+describe("range keys", () => {
+  it("render only what parseRange serves: no Today, no Custom", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const keys = text.slice(text.indexOf('class="keys"'));
+    const labels = [...keys.slice(0, keys.indexOf("</div>")).matchAll(/>([^<]+)<\/a>/g)].map(
+      (m) => m[1],
+    );
+    expect(labels).toEqual(["7 days", "30 days", "90 days"]);
+    expect(text).not.toContain(">Today</a>");
+    expect(text).not.toContain(">Custom<");
+    expect(text).not.toContain('type="date"');
+  });
+});
+
+describe("no hard-coded health badge", () => {
+  it("never renders the old 'd1 ok' / 'Healthy' status block", async () => {
+    const cookieVal = await authedCookie();
+    for (const path of ["/app", "/app/pages", "/app/devices"]) {
+      const { text } = await fetch_(
+        req(path, { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      );
+      expect(text).not.toContain("d1 ok");
+      expect(text).not.toContain("Healthy.");
+    }
+  });
+});
+
+describe("CSP: every <script> carries the request nonce", () => {
+  it("authed views and the /share surface nonce every script tag", async () => {
+    const cookieVal = await authedCookie();
+    const paths = ["/app", "/app/pages", "/app/sources", "/app/geography", "/app/devices"];
+    for (const path of paths) {
+      const { res, text } = await fetch_(
+        req(path, { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      );
+      const nonce = res.headers.get("content-security-policy")?.match(/'nonce-([a-f0-9]+)'/)?.[1];
+      expect(nonce, path).toBeTruthy();
+      const tags = [...text.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
+      expect(tags.length, path).toBeGreaterThan(0);
+      // strict-dynamic ignores 'self': a <script src> without the nonce is blocked.
+      for (const tag of tags) expect(tag, `${path}: ${tag}`).toContain(`nonce="${nonce}"`);
+      // …and no inline event handlers anywhere.
+      expect(text).not.toMatch(/\son[a-z]+="/);
+    }
   });
 });
 
@@ -655,22 +740,23 @@ describe("no-sites empty state", () => {
 // ---------------------------------------------------------------------------
 
 describe("sampled data badge", () => {
-  it("shows ~est badge when cards.sampled is true", async () => {
+  it("marks estimates with ≈ and a notice when cards.sampled is true", async () => {
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: true });
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("~est");
+    expect(text).toContain("Some of this range is estimated.");
+    expect(text).toMatch(/≈|&asymp;/);
   });
 
-  it("does NOT show ~est badge when cards.sampled is false", async () => {
+  it("shows no estimate notice when cards.sampled is false", async () => {
     vi.mocked(queries.getStatCards).mockResolvedValue({ ...MOCK_CARDS, sampled: false });
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).not.toContain("~est");
+    expect(text).not.toContain("Some of this range is estimated.");
   });
 });
 
@@ -681,19 +767,19 @@ describe("sampled data badge", () => {
 // ---------------------------------------------------------------------------
 
 describe("breakdown table honesty (Task 9)", () => {
-  it("Visitors column header carries the same daily-counted-once caveat as Overview", async () => {
+  it("Visitors column header links the same daily-counted-once caveat as Overview", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    const visitorsHeaderIdx = text.indexOf(">Visitors<");
-    expect(visitorsHeaderIdx).toBeGreaterThan(-1);
-    const headerSnippet = text.slice(Math.max(0, visitorsHeaderIdx - 400), visitorsHeaderIdx);
-    expect(headerSnippet).toContain("counted once per day");
+    const root = parse(text);
+    const th = root.querySelectorAll("table.bd thead th").find((h) => h.text.includes("Visitors"));
+    expect(th?.querySelector('a[href="#fn-1"]')).toBeTruthy();
+    expect(root.querySelector("#fn-1")?.text).toContain("A visitor counts once per day");
   });
 
-  it("renders the ~est badge on a row whose sampled flag is set, not on unsampled rows", async () => {
+  it("marks a sampled row with ≈, not unsampled rows", async () => {
     const sampledRow: BreakdownRow = {
       label: "/sampled-page",
       pageviews: 900,
@@ -706,25 +792,136 @@ describe("breakdown table honesty (Task 9)", () => {
     const { text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    const sampledRowStart = text.indexOf("/sampled-page");
-    expect(sampledRowStart).toBeGreaterThan(-1);
-    expect(text.slice(sampledRowStart, sampledRowStart + 800)).toContain("~est");
+    const rows = parse(text).querySelectorAll("table.bd tbody tr");
+    const row = (label: string) => rows.find((r) => r.querySelector("th")?.text.includes(label));
+    expect(row("/sampled-page")?.querySelector(".est")).toBeTruthy();
+    expect(row("/home")?.querySelector(".est")).toBeFalsy();
+  });
 
-    const homeRowStart = text.indexOf("/home");
-    expect(homeRowStart).toBeGreaterThan(-1);
-    expect(text.slice(homeRowStart, homeRowStart + 800)).not.toContain("~est");
+  it("full tables foot with 'Rows added up' and 'Site total', flagging an over-sum", async () => {
+    vi.mocked(queries.getTopPages).mockResolvedValue([
+      ...MOCK_BREAKDOWN,
+      { label: "/docs", pageviews: 500, visitors: 300, share: 0.1, sampled: false },
+    ]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const foot = parse(text).querySelectorAll("table.bd tfoot tr");
+    expect(foot[0]?.querySelector("th")?.text).toBe("Rows added up");
+    expect(foot[0]?.text).toContain("1,500*");
+    expect(foot[1]?.querySelector("th")?.text).toBe("Site total");
+    expect(foot[1]?.text).toContain("1,200");
+    expect(text).toContain("marks the column each list is ordered by");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Geography map JSON safety (Task 9): jsonForScript must neutralize
-// "</script>" inside a country label before it lands inline in a <script>
-// block. Not exploitable today (cf.country is trusted), but the escaping
-// must hold for any value routed through this helper.
+// Sources page: the (direct) definition depends on site.domain — the
+// collector folds same-site referrers into (direct) only when it is set.
 // ---------------------------------------------------------------------------
 
-describe("geography map JSON safety (jsonForScript, Task 9)", () => {
-  it("escapes </script> inside a country label instead of leaking it verbatim", async () => {
+// ---------------------------------------------------------------------------
+// Breakdown headlines: below the 50-row limit the rows cover the site, so the
+// sentence uses the site total; at the limit it says "X of Y" with X the rows' own sum.
+// ---------------------------------------------------------------------------
+
+describe("breakdown headline at and under the row limit", () => {
+  const fifty = (prefix: string): BreakdownRow[] =>
+    Array.from({ length: 50 }, (_, i) => ({
+      label: `${prefix}${i}`,
+      pageviews: 60 - i,
+      visitors: 1,
+      share: (60 - i) / 5000,
+      sampled: false,
+    }));
+  // 60 + 59 + … + 11 = 1,775 of the site's 5,000.
+  const SUM = "1,775";
+
+  it("pages under the limit: 'N pages drew <site total> pageviews'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      "2 pages drew 5,000 pageviews.",
+    );
+  });
+
+  it("pages at the limit: 'The top 50 pages drew X of Y pageviews'", async () => {
+    vi.mocked(queries.getTopPages).mockResolvedValue(fifty("/p"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      `The top 50 pages drew ${SUM} of 5,000 pageviews.`,
+    );
+  });
+
+  it("sources under the limit: 'N sources sent <site total> pageviews'", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      "2 sources sent 5,000 pageviews.",
+    );
+  });
+
+  it("sources at the limit: 'The top 50 sources sent X of Y pageviews'", async () => {
+    vi.mocked(queries.getTopSources).mockResolvedValue(fifty("s"));
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(parse(text).querySelector(".page-h .say")?.text).toContain(
+      `The top 50 sources sent ${SUM} of 5,000 pageviews.`,
+    );
+  });
+});
+
+describe("sources (direct) definition", () => {
+  const DIRECT: BreakdownRow = {
+    label: "(direct)",
+    pageviews: 10,
+    visitors: 5,
+    share: 1,
+    sampled: false,
+  };
+
+  it("counts clicks between your own pages as (direct) when the site has a domain", async () => {
+    vi.mocked(queries.getTopSources).mockResolvedValue([DIRECT]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain(
+      "every pageview without an outside referrer: a typed address, a bookmark, an app that withholds it, or a click between your own pages",
+    );
+  });
+
+  it("says own-page clicks show under the hostname when the site has no domain", async () => {
+    const noDomain = { ...MOCK_SITE, domain: "" };
+    vi.mocked(queries.listSites).mockResolvedValue([noDomain]);
+    vi.mocked(queries.getSite).mockResolvedValue(noDomain);
+    vi.mocked(queries.getTopSources).mockResolvedValue([DIRECT]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).not.toContain("or a click between your own pages");
+    expect(text).toContain("Clicks between your own pages show up under your own hostname");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Geography: a hostile country label is escaped as HTML, and no inline
+// script carries data any more (the dot map is static SVG).
+// ---------------------------------------------------------------------------
+
+describe("geography label safety", () => {
+  it("escapes markup inside a country label", async () => {
     const evilRow: BreakdownRow = {
       label: "</script><img src=x>",
       pageviews: 10,
@@ -738,12 +935,8 @@ describe("geography map JSON safety (jsonForScript, Task 9)", () => {
       req("/app/geography", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Plain JSON.stringify would emit this literally inside the inline
-    // <script> block, letting the string's own "</script>" close the tag.
-    expect(text).not.toContain("</script><img src=x>");
-    // jsonForScript escapes the angle brackets to literal < / >
-    // text, which stays valid JSON/JS but can no longer close the tag.
-    expect(text).toContain("\\u003c/script\\u003e\\u003cimg src=x\\u003e");
+    expect(text).not.toContain("<img src=x>");
+    expect(text).toContain("&lt;img src=x&gt;");
   });
 });
 
@@ -871,8 +1064,8 @@ describe("/app/devices", () => {
     // The tab bar renders the first four views as tabs only; overflow views
     // render as full-label links inside the <details> More sheet — so Devices
     // must appear after the <details> marker, not before it.
-    const tabbarStart = text.indexOf('class="mobile-tabbar"');
-    const moreStart = text.indexOf('<details class="mobile-more"', tabbarStart);
+    const tabbarStart = text.indexOf('class="tabbar"');
+    const moreStart = text.indexOf('<details class="tab-more"', tabbarStart);
     expect(moreStart).toBeGreaterThan(tabbarStart);
     const tabsSection = text.slice(tabbarStart, moreStart);
     const moreSection = text.slice(moreStart);
@@ -944,7 +1137,7 @@ describe("/app/events", () => {
     const { text } = await fetch_(
       req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("No custom events in this period");
+    expect(text).toContain("No custom events in this range");
     expect(text).toContain("skopia(&#39;event&#39;");
   });
 
@@ -961,50 +1154,53 @@ describe("/app/events", () => {
 // Live top-pages panel (Theme A)
 // ---------------------------------------------------------------------------
 
+describe("first run (no pageviews in 90 days)", () => {
+  it("shows the snippet and a static listening beacon, with no tabs or range keys", async () => {
+    vi.mocked(queries.getStatCards).mockResolvedValue({
+      ...MOCK_CARDS,
+      pageviews: 0,
+      visitors: 0,
+    });
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const root = parse(text);
+    expect(root.querySelector(".first h1")?.text).toContain("No pageviews yet");
+    // The snippet points at this Worker's own origin and this site's id.
+    const snip = root.querySelector("#snippet")?.text ?? "";
+    expect(snip).toContain('"https://skopia.test/skopia.js"');
+    expect(snip).toContain('"site-001"');
+    expect(snip).toContain('"https://skopia.test/e"');
+    // A static hollow beacon, a grey zero, no blinking cursor.
+    expect(root.querySelector(".listen .beacon")).toBeTruthy();
+    expect(root.querySelector(".listen [data-odo]")?.classList.contains("zero")).toBe(true);
+    expect(root.querySelector(".listen .ldot")).toBeFalsy();
+    expect(text).not.toMatch(/class="[^"]*\b(cursor|caret|blink)/);
+    expect(text).not.toContain("@keyframes blink");
+    // Nothing to browse yet: no view tabs, no range keys.
+    expect(root.querySelector("nav.views")).toBeFalsy();
+    expect(root.querySelector(".keys")).toBeFalsy();
+  });
+});
+
 describe("live top-pages panel", () => {
   it("Overview renders the live-pages panel container", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("Active pages right now");
-    expect(text).toContain('id="live-pages-list"');
+    expect(text).toContain("Active pages");
+    expect(text).toContain('id="live-pages"');
   });
 
-  it("live script consumes topPages and builds DOM safely (no innerHTML)", async () => {
-    const cookieVal = await authedCookie();
-    const { text } = await fetch_(
-      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
-    );
-    const script = text.slice(text.indexOf("function connect()"));
-    expect(script).toContain("d.topPages");
-    // Paths are visitor-controlled input: rows must be built via
-    // createElement/textContent, never innerHTML string concatenation.
-    expect(script).toContain("textContent=p.label");
-    expect(script).not.toContain("innerHTML+=");
-  });
-
-  it("non-Overview pages do not render the panel (script no-ops via null check)", async () => {
+  it("non-Overview pages carry no live panel and open no socket", async () => {
     const cookieVal = await authedCookie();
     const { text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).not.toContain('id="live-pages-list"');
-  });
-
-  it("live script pings the socket on an interval to refresh a stale live count", async () => {
-    // Eviction is lazy server-side (site-live.ts currentSnapshot()): without a
-    // client-driven ping, a dashboard left open would show a stale count
-    // forever once a visitor leaves and no further site-wide traffic arrives.
-    const cookieVal = await authedCookie();
-    const { text } = await fetch_(
-      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
-    );
-    const script = text.slice(text.indexOf("function connect()"));
-    expect(script).toContain("setInterval(function(){");
-    expect(script).toContain("ws.send('ping')");
-    // The timer must be torn down on close so a reconnect doesn't leak a
-    // second ping loop stacked on top of the old one.
-    expect(script).toContain("clearInterval(pingTimer)");
+    expect(text).not.toContain('id="live-pages"');
+    expect(text).not.toContain("dash-live.js");
+    expect(text).not.toContain("data-live-site");
   });
 });

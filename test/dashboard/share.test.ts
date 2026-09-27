@@ -16,6 +16,7 @@
  */
 
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { parse } from "node-html-parser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BreakdownRow, SiteRow, StatCards, TimeSeriesPoint } from "../../src/shared/types";
@@ -146,9 +147,9 @@ describe("GET /share/:token", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type") ?? "").toMatch(/text\/html/);
     expect(text).toContain("test.dev");
-    // fmtNum(1200) = "1.2K", fmtNum(5000) = "5K" — stat cards from mock data.
-    expect(text).toContain("1.2K");
-    expect(text).toContain("5K");
+    // The readout prints whole numbers — visitors and pageviews from mock data.
+    expect(text).toContain("1,200");
+    expect(text).toContain("5,000");
 
     const csp = res.headers.get("content-security-policy") ?? "";
     const headerNonce = csp.match(/'nonce-([a-f0-9]+)'/)?.[1];
@@ -157,20 +158,30 @@ describe("GET /share/:token", () => {
     expect(headerNonce).toBe(bodyNonce);
   });
 
-  it("wears the responsive layout classes and a public-safe mobile tab bar", async () => {
+  it("wears the shared casing and a public-safe mobile tab bar", async () => {
     const { text } = await fetch_(req(`/share/${VALID_TOKEN}`));
-    // The @media(max-width:768px) rules key off these classes; without them the
-    // public surface renders a fixed 224px sidebar squeezing content on a phone.
-    expect(text).toContain('class="dash-sidebar"');
-    expect(text).toContain('class="dash-topbar"');
-    expect(text).toContain('class="dash-content"');
+    // The casing bar, the views row and the footer plate all render.
+    expect(text).toContain('class="bar"');
+    expect(text).toContain('class="views"');
+    expect(text).toContain('class="foot"');
     // A public bottom tab bar mirrors the authed one but stays public-safe.
-    expect(text).toContain('class="mobile-tabbar"');
+    expect(text).toContain('class="tabbar"');
     // Its tabs link the /share surface, never the authed /app routes...
-    expect(text).toMatch(new RegExp(`class="mobile-tabbar"[\\s\\S]*/share/${VALID_TOKEN}`));
-    // ...and the authed health-status block never leaks into the public sheet.
-    expect(text).not.toContain("skopia · d1 ok");
+    expect(text).toMatch(new RegExp(`class="tabbar"[\\s\\S]*/share/${VALID_TOKEN}`));
+    // ...and no authed-only copy leaks into the public page.
+    expect(text).not.toContain("d1 ok");
     expect(text).not.toContain("Running on your Worker");
+    expect(text).not.toContain("Sign out");
+  });
+
+  it("every <script> tag carries the nonce from the CSP header", async () => {
+    for (const path of ["", "/pages", "/sources", "/devices", "/campaigns", "/events"]) {
+      const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}${path}`));
+      const nonce = nonceOf(res);
+      const tags = [...text.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
+      expect(tags.length).toBeGreaterThan(0);
+      for (const tag of tags) expect(tag).toContain(`nonce="${nonce}"`);
+    }
   });
 
   // Migrated from the old /public/:token suite (dashboard.test.ts):
@@ -449,7 +460,37 @@ describe("GET /share/:token — read-through cache + online-now (Task 2)", () =>
 
     const { res, text } = await fetch_(req(`/share/${token}`));
     expect(res.status).toBe(200);
-    expect(text).toContain("7 online now");
+    const root = parse(text);
+    // Above zero: the full compartment, the lime (non-zero) figure, no idle strip.
+    expect(root.querySelector("#live .live-full [data-odo]")?.text).toBe("7");
+    expect(root.querySelector("#live")?.classList.contains("is-zero")).toBe(false);
+    expect(root.querySelector("#live .live-full [data-odo]")?.classList.contains("zero")).toBe(
+      false,
+    );
+    expect(root.querySelector(".console")?.classList.contains("idle")).toBe(false);
+    expect(root.querySelector("#live-say")?.text).toBe("7 visitors online now");
+    // ADR-0012: the public page never opens the WebSocket.
+    expect(text).not.toContain("/live?");
+    expect(text).not.toContain("dash-live.js");
+  });
+
+  it("at zero online collapses to the grey one-line strip", async () => {
+    const token = `shr_${"g".repeat(43)}`;
+    useSite("site-live-zero", token);
+    (env as { SITE_LIVE: unknown }).SITE_LIVE = stubSiteLive(async () => ({
+      visitors: 0,
+      topPages: [],
+    }));
+
+    const { text } = await fetch_(req(`/share/${token}`));
+    const root = parse(text);
+    expect(root.querySelector("#live")?.classList.contains("is-zero")).toBe(true);
+    expect(root.querySelector(".console")?.classList.contains("idle")).toBe(true);
+    // The figure is grey at zero: every odometer carries the zero class.
+    const odos = root.querySelectorAll("#live [data-odo]");
+    expect(odos.length).toBeGreaterThan(0);
+    for (const o of odos) expect(o.classList.contains("zero")).toBe(true);
+    expect(root.querySelector(".live-strip")?.text).toContain("0 online now · last 5 minutes");
   });
 
   it("degrades to 200 with no online-now badge when the snapshot RPC throws", async () => {

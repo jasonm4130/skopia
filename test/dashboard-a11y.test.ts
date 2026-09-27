@@ -353,46 +353,41 @@ describe("breakdown table", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Live regions — aria-live on the live badge + live-pages list (4.1.3)
+// Live regions — one throttled role=status summary for online-now (4.1.3)
 // ---------------------------------------------------------------------------
 
 describe("live regions", () => {
-  it("authed /app puts aria-live on the live badge and the live-pages list", async () => {
+  it("authed /app renders the active-pages list and a separate role=status summary", async () => {
     const { root } = await render("/app", {
       headers: { Cookie: `skopia_session=${await authedCookie()}` },
     });
-    const badge = root.querySelector("#live-badge");
-    expect(badge?.getAttribute("aria-live")).toBeTruthy();
-    const list = root.querySelector("#live-pages-list");
-    expect(list?.getAttribute("aria-live")).toBeTruthy();
-    // The list is a <ul>, so the live script must append <li> rows.
+    // The list is a <ul>, so the live script reorders <li> rows keyed by path.
+    const list = root.querySelector("#live-pages");
     expect(list?.tagName?.toLowerCase()).toBe("ul");
+    // Announcements go through one throttled status line, not the list itself.
+    expect(list?.getAttribute("aria-live")).toBeFalsy();
+    expect(root.querySelector("#live-say")?.getAttribute("role")).toBe("status");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Chart — decorative <svg> is aria-hidden; a .sr-only <table> carries the data
-// (1.1.1); toggle buttons expose aria-pressed (4.1.2)
+// Chart — decorative <svg> is aria-hidden; a visible "Every day as a table"
+// <details> carries the data (1.1.1)
 // ---------------------------------------------------------------------------
 
 describe("chart accessibility", () => {
-  it("/share overview hides the decorative chart <svg> and exposes a .sr-only data <table>", async () => {
+  it("/share overview hides the decorative chart <svg> and exposes an every-day <table>", async () => {
     const { root } = await render(`/share/${VALID_TOKEN}`);
-    const svg = root.querySelector("#chart-svg");
+    const svg = root.querySelector(".plot svg");
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
     // Not also role=img — avoids double-announcement alongside the table.
     expect(svg?.getAttribute("role")).toBeFalsy();
-    const srTable = root.querySelector("table.sr-only");
-    expect(srTable, "visually-hidden chart data table").toBeTruthy();
-    expect(srTable?.querySelectorAll("th[scope]").length).toBeGreaterThanOrEqual(1);
+    expect(root.querySelector("details.days summary")?.text).toContain("Every day as a table");
+    const table = root.querySelector("details.days table");
+    expect(table, "every-day data table").toBeTruthy();
+    expect(table?.querySelectorAll("th[scope]").length).toBeGreaterThanOrEqual(1);
     // One data row per series point (MOCK_SERIES has 3).
-    expect(srTable?.querySelectorAll("tbody tr")).toHaveLength(MOCK_SERIES.length);
-  });
-
-  it("chart toggle buttons carry aria-pressed reflecting the active metric", async () => {
-    const { root } = await render(`/share/${VALID_TOKEN}`);
-    expect(root.querySelector("#btn-visitors")?.getAttribute("aria-pressed")).toBe("true");
-    expect(root.querySelector("#btn-pageviews")?.getAttribute("aria-pressed")).toBe("false");
+    expect(table?.querySelectorAll("tbody tr")).toHaveLength(MOCK_SERIES.length);
   });
 });
 
@@ -408,6 +403,20 @@ describe("BASE_CSS utilities", () => {
     expect(css).toContain(":focus-visible");
     expect(css).toContain(".sr-only");
     expect(css).toContain("prefers-reduced-motion");
+  });
+
+  it("reserves room under the fixed mobile tab bar so it never hides the footer", async () => {
+    const { root } = await render("/login");
+    const css = root.querySelector("style")?.text ?? "";
+    // Bar: 56px tabs + 1px top rule, plus the safe-area inset as its bottom padding.
+    const tab = Number(css.match(/\.tabbar a,\.tabbar summary\{[^}]*height:(\d+)px/)?.[1]);
+    expect(css).toMatch(/\.tabbar\{[^}]*padding:0 4px env\(safe-area-inset-bottom,0px\)/);
+    // Body: the same inset plus at least the bar's height.
+    const pad = css.match(
+      /body\{[^}]*padding-bottom:calc\(env\(safe-area-inset-bottom,0px\) \+ (\d+)px\)/,
+    );
+    expect(pad, "body padding-bottom covers the tab bar").toBeTruthy();
+    expect(Number(pad?.[1])).toBeGreaterThanOrEqual(tab + 1);
   });
 });
 
@@ -433,16 +442,18 @@ describe("contrast + responsive auth cards", () => {
     expect(pages.text).not.toContain("#6a7184");
   });
 
-  it("auth cards use max-width, not a fixed width:360/400/440px", async () => {
+  it("auth forms sit in a fluid grid column, not a fixed pixel width", async () => {
     vi.mocked(queries.getOwner).mockResolvedValue(MOCK_OWNER);
     const login = await render("/login");
     // A fixed pixel width (not part of `max-width:`) must not appear.
-    expect(login.text).not.toMatch(/(?<!max-)width:(?:360|400|440)px/);
-    expect(login.text).toContain("max-width:360px");
+    expect(login.text).not.toMatch(/(?<!max-)width:(?:360|380|400|440|480)px/);
+    expect(login.root.querySelector("main.login-main form.login-form")).toBeTruthy();
+    // The column shrinks below its cap: minmax(0, cap), and one column on a phone.
+    expect(login.text).toContain("grid-template-columns:minmax(0,380px) minmax(0,500px)");
 
     vi.mocked(queries.getOwner).mockResolvedValue(null);
     const setup = await render("/setup");
-    expect(setup.text).not.toMatch(/(?<!max-)width:(?:360|400|440)px/);
-    expect(setup.text).toContain("max-width:400px");
+    expect(setup.text).not.toMatch(/(?<!max-)width:(?:360|380|400|440|480)px/);
+    expect(setup.root.querySelector("main.login-main.solo form.login-form")).toBeTruthy();
   });
 });

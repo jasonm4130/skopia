@@ -113,7 +113,7 @@ docs/assets/      README/marketing screenshots
 docs/research/    Deep-dive research (competitive analysis, Cloudflare architecture)
 docs/specs/       Approved design specs
 docs/decisions/   Architecture Decision Records (ADRs)
-public/           Static assets shipped with the Worker (fonts + vendored jsVectorMap)
+public/           Static assets shipped with the Worker (fonts, dashboard JS + dot-map base)
 src/              Worker source (TypeScript strict)
 CLAUDE.md         Operating contract for agents/humans in this repo
 ```

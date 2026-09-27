@@ -4,6 +4,15 @@
 - **Status:** accepted
 - **Owner:** cloudflare-tech-lead
 
+> **Amendment — 2026-09-27.** The one-way copy no longer applies. skopia-www's redesign
+> (skopia-www PR #9, commit `fe45214`) deleted its `public/tokens.css` and now keeps its
+> tokens in its own `src/styles/site.css`. The dashboard's instrument-panel redesign
+> (skopia PR #32) was ported from that design, so the two still share one visual
+> language, but by being aligned by hand rather than by copying a file.
+> `src/shared/tokens.css` remains the reference for the dashboard's inlined stylesheet
+> only. The `@skopia/design` package trigger below is unchanged, should shared tokens
+> return.
+
 ## Context
 
 ADR-0007 puts the product (`skopia`) and marketing (`skopia-www`) in separate repos. They share a

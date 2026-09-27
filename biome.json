@@ -12,7 +12,8 @@
       "!public",
       "!design",
       "!src/shared/skopia-embed.ts",
-      "!src/shared/schema-embed.ts"
+      "!src/shared/schema-embed.ts",
+      "!src/dashboard/render/map-data.ts"
     ]
   },
   "formatter": {

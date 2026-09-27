@@ -1,145 +1,51 @@
 /**
  * Skopia design tokens — the source of truth (ADR-0009).
  *
- * Extracted verbatim from the inline design values in `src/dashboard/index.ts`
- * (originally also the marketing landing page, split out to skopia-www per
- * ADR-0007). This file is NOT imported by the Worker (Workers don't
- * serve CSS from `src/`); it is the canonical reference that the marketing site
- * (skopia-www) copies into `public/tokens.css`. When tokens change, edit them HERE
- * and re-copy. Do not edit the marketing copy directly.
+ * The "instrument panel" system shared by the dashboard and skopia.dev: an
+ * enamel casing (paper + graphite ink) with graphite display glass set into it
+ * for every readout of data. Phosphor lime (--live) appears on displays only,
+ * and only for live data that is above zero.
+ *
+ * This file is NOT imported by the Worker (Workers don't serve CSS from
+ * `src/`). The dashboard's stylesheet (src/dashboard/render/styles.ts) mirrors
+ * these values: when a token changes, edit it HERE first, then update that copy.
+ * skopia-www no longer copies this file (ADR-0009 amendment, 2026-09-27).
  */
 
 :root {
-  /* === Colors === */
-  --color-bg: #0a0c11;
-  --color-bg-mid: #0c0e14;
-  --color-surface: #12151d;
-  --color-border: #20252f;
-  --color-border-subtle: #161a22;
-  --color-border-accent: #2a3550;
-  --color-border-alt: #2a3040;
-  --color-text-primary: #e8eaef;
-  --color-text-secondary: #9aa1b2;
-  --color-text-muted: #8b92a4;
-  --color-text-dim: #7b8296; /* AA >=4.5:1 on all surfaces; was #6a7184 (~4:1, sub-AA for text) */
-  --color-text-faint: #5a6072;
-  --color-text-meta: #9097a8;
-  --color-accent: #4d86ff;
-  --color-accent-light: #9fb4ff;
-  --color-accent-soft: #8fb0ff;
-  --color-accent-purple: #7a5cff;
-  --color-green: #2bd888;
-  --color-yellow: #ffce4d;
-  --color-dot: #2c313d;
-  --color-chart-grid: #1a1f2a;
-  --color-muted-x: #454b59;
-  --color-scrollbar-thumb: #232838;
-  --color-nav-bg: rgba(10, 12, 17, 0.78);
-  --color-accent-bg-subtle: rgba(77, 134, 255, 0.1);
-  --color-accent-bg-faint: rgba(77, 134, 255, 0.04);
-  --color-accent-bg-header: rgba(77, 134, 255, 0.07);
-  --color-green-bg: rgba(43, 216, 136, 0.1);
+  /* === Casing (enamel) === */
+  --paper: #e3e5df;
+  --paper-hi: #eef0eb;
+  --paper-lo: #d7dad3;
+  --ink: #121512;
+  --ink-2: #3b413b;
+  --ink-3: #555c55;
+  --rule: #c6cbc2;
+  --rule-2: #abb1a8;
+  --bar: #cdd1c8;
+  --bar-hi: #bfc4b9;
+
+  /* === Display glass (graphite) === */
+  --disp: #111412;
+  --disp-2: #181c19;
+  --disp-rule: #272d29;
+  --disp-ink: #e9eee6;
+  --disp-ink-2: #a9b2a8;
+  --disp-ink-3: #8a9389;
+  --disp-col: #4a544c;
+
+  /* === Signal === */
+  --live: #c8f25a; /* displays only, live data only, never at zero */
+  --bad: #8a2a1c;
 
   /* === Typography === */
-  --font-display: "Space Grotesk", sans-serif;
-  --font-body: "Hanken Grotesk", sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  --sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* === Layout === */
-  --max-width: 1180px;
-  --max-width-faq: 820px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 14px;
-  --radius-3xl: 16px;
-  --radius-4xl: 20px;
-  --shadow-card: 0 36px 80px -30px rgba(0, 0, 0, 0.85);
-  --shadow-btn: 0 8px 26px rgba(77, 134, 255, 0.32);
-  --shadow-shot: 0 40px 90px -40px rgba(0, 0, 0, 0.9);
-}
-
-/* === Base reset === */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
-html,
-body {
-  margin: 0;
-}
-
-body {
-  min-height: 100vh;
-  background: var(--color-bg);
-  color: var(--color-text-primary);
-  font-family: var(--font-body);
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-/* === Animation === */
-@keyframes skopiaPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
-/* === Range input (cost calculator) === */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  border-radius: 4px;
-  background: var(--color-border);
-  outline: none;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  border: 3px solid var(--color-bg);
-  box-shadow: 0 0 0 1px var(--color-accent);
-  cursor: pointer;
-}
-
-input[type="range"]::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  border: 3px solid var(--color-bg);
-  cursor: pointer;
-}
-
-/* === Scrollbar === */
-::-webkit-scrollbar {
-  width: 11px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar-thumb);
-  border-radius: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--color-bg);
+  /* === Motion + layout === */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --gut: clamp(16px, 3.2vw, 40px);
+  --max: 1320px;
+  --bezel:
+    0 0 0 1px #000, 0 0 0 6px #1b1f1c, 0 0 0 7px #0a0b0a, 0 30px 50px -34px rgba(0, 0, 0, 0.5);
 }

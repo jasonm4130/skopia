@@ -74,9 +74,9 @@ docs/decisions/        ADRs — one decision per file, dated, with context + con
 
 - **`skopia-www`** (`jasonm4130/skopia-www`) — the marketing site (**skopia.dev**). Its own repo: a **static Astro**
   site deployed to **Cloudflare Workers Static Assets** (ADR-0007), **not** a workspace member
-  of this repo (so the one-click Deploy button stays single-package). Design tokens flow
-  one-way: `src/shared/tokens.css` here is the **source of truth**, copied into
-  `skopia-www/public/tokens.css` (ADR-0009) — edit tokens here, then re-copy. The product
+  of this repo (so the one-click Deploy button stays single-package). It no longer copies
+  `src/shared/tokens.css` (ADR-0009, amended 2026-09-27); its styles live in its own
+  `src/styles/site.css`. The product
   Worker serves the app/collector (`app.skopia.dev`); marketing owns the apex (`skopia.dev`).
 
 ## Workflow

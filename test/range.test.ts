@@ -1,5 +1,5 @@
 /**
- * Tests for parseRange (src/dashboard/index.ts).
+ * Tests for parseRange (src/dashboard/range.ts).
  *
  * The picker labels promise an exact window — "Last 7 days" must cover 7
  * calendar days, not 8. The SQL filter is inclusive on both ends

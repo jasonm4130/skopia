@@ -16,6 +16,7 @@ import {
   getSiteByPublicToken,
   getStatCards,
   getTimeSeries,
+  getTopBrowsers,
   getTopCountries,
   getTopPages,
   getTopUtmCampaigns,
@@ -70,6 +71,10 @@ beforeAll(async () => {
     ["site-a", "2026-06-19", "utm_medium", "email", 40, 30, 0],
     ["site-a", "2026-06-20", "utm_medium", "social", 10, 8, 0],
     ["site-a", "2026-06-19", "utm_campaign", "launch-week", 25, 20, 0],
+    // browser dimension: pageview order and visitor order disagree on purpose
+    ["site-a", "2026-06-19", "browser", "Firefox", 90, 10, 0],
+    ["site-a", "2026-06-19", "browser", "Safari", 20, 18, 0],
+    ["site-a", "2026-06-19", "browser", "Edge", 5, 18, 0],
   ];
 
   const stmt = env.DB.prepare(
@@ -297,6 +302,30 @@ describe("getBreakdown generic", () => {
     );
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]?.label).toBeTruthy();
+  });
+
+  const day = { from: "2026-06-19", to: "2026-06-19" };
+
+  it("orders by pageviews by default", async () => {
+    const rows = await getBreakdown(env.DB, "site-a", day, "browser", 10);
+    expect(rows.map((r) => r.label)).toEqual(["Firefox", "Safari", "Edge"]);
+  });
+
+  it("orderBy 'visitors' ranks by visitors, ties broken by pageviews", async () => {
+    const rows = await getBreakdown(env.DB, "site-a", day, "browser", 10, "visitors");
+    expect(rows.map((r) => r.label)).toEqual(["Safari", "Edge", "Firefox"]);
+    // share stays pageview-based whatever the order
+    expect(rows[2]?.share).toBeCloseTo(90 / 100);
+  });
+
+  it("orderBy 'visitors' applies before LIMIT (keeps the right rows)", async () => {
+    const rows = await getBreakdown(env.DB, "site-a", day, "browser", 1, "visitors");
+    expect(rows.map((r) => r.label)).toEqual(["Safari"]);
+  });
+
+  it("the visitors-only panels (browsers) rank by visitors", async () => {
+    const rows = await getTopBrowsers(env.DB, "site-a", day, 10);
+    expect(rows[0]?.label).toBe("Safari");
   });
 });
 
