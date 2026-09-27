@@ -157,20 +157,30 @@ describe("GET /share/:token", () => {
     expect(headerNonce).toBe(bodyNonce);
   });
 
-  it("wears the responsive layout classes and a public-safe mobile tab bar", async () => {
+  it("wears the shared casing and a public-safe mobile tab bar", async () => {
     const { text } = await fetch_(req(`/share/${VALID_TOKEN}`));
-    // The @media(max-width:768px) rules key off these classes; without them the
-    // public surface renders a fixed 224px sidebar squeezing content on a phone.
-    expect(text).toContain('class="dash-sidebar"');
-    expect(text).toContain('class="dash-topbar"');
-    expect(text).toContain('class="dash-content"');
+    // The casing bar, the views row and the footer plate all render.
+    expect(text).toContain('class="bar"');
+    expect(text).toContain('class="views"');
+    expect(text).toContain('class="foot"');
     // A public bottom tab bar mirrors the authed one but stays public-safe.
-    expect(text).toContain('class="mobile-tabbar"');
+    expect(text).toContain('class="tabbar"');
     // Its tabs link the /share surface, never the authed /app routes...
-    expect(text).toMatch(new RegExp(`class="mobile-tabbar"[\\s\\S]*/share/${VALID_TOKEN}`));
-    // ...and the authed health-status block never leaks into the public sheet.
-    expect(text).not.toContain("skopia · d1 ok");
+    expect(text).toMatch(new RegExp(`class="tabbar"[\\s\\S]*/share/${VALID_TOKEN}`));
+    // ...and no authed-only copy leaks into the public page.
+    expect(text).not.toContain("d1 ok");
     expect(text).not.toContain("Running on your Worker");
+    expect(text).not.toContain("Sign out");
+  });
+
+  it("every <script> tag carries the nonce from the CSP header", async () => {
+    for (const path of ["", "/pages", "/sources", "/devices", "/campaigns", "/events"]) {
+      const { res, text } = await fetch_(req(`/share/${VALID_TOKEN}${path}`));
+      const nonce = nonceOf(res);
+      const tags = [...text.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
+      expect(tags.length).toBeGreaterThan(0);
+      for (const tag of tags) expect(tag).toContain(`nonce="${nonce}"`);
+    }
   });
 
   // Migrated from the old /public/:token suite (dashboard.test.ts):

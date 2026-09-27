@@ -357,12 +357,10 @@ describe("breakdown table", () => {
 // ---------------------------------------------------------------------------
 
 describe("live regions", () => {
-  it("authed /app puts aria-live on the live badge and the live-pages list", async () => {
+  it("authed /app puts aria-live on the live-pages list", async () => {
     const { root } = await render("/app", {
       headers: { Cookie: `skopia_session=${await authedCookie()}` },
     });
-    const badge = root.querySelector("#live-badge");
-    expect(badge?.getAttribute("aria-live")).toBeTruthy();
     const list = root.querySelector("#live-pages-list");
     expect(list?.getAttribute("aria-live")).toBeTruthy();
     // The list is a <ul>, so the live script must append <li> rows.

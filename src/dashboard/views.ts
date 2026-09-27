@@ -24,6 +24,7 @@ import type { SiteRow } from "../shared/types";
 import type { parseRange } from "./range";
 import { statCardsHtml, timeSeriesChartHtml } from "./render/charts";
 import { esc, fmtNum, jsonForScript } from "./render/html";
+import { type Chrome, pageHead } from "./render/layout";
 import { breakdownCard, breakdownTable } from "./render/tables";
 
 export type RangeInfo = ReturnType<typeof parseRange>;
@@ -34,6 +35,10 @@ export interface ViewCtx {
   site: SiteRow;
   range: RangeInfo;
   nonce: string;
+  /** The page shell's view of this request (surface, hrefs). */
+  ch: Chrome;
+  /** Server-side online-now snapshot; null when it could not be read. */
+  online: number | null;
 }
 
 export interface BreakdownView {
@@ -73,7 +78,9 @@ export async function overviewContent(ctx: ViewCtx, opts: { share: boolean }): P
       </ul>
     </div>`;
 
+  const online = ctx.online === null ? "" : `${ctx.online} online now`;
   return `
+    ${pageHead("Overview", range, online)}
     ${statCardsHtml(cards, cards.sampled)}
     ${timeSeriesChartHtml(series, range.label, site.id, range.key, nonce)}
     <div class="breakdown-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
@@ -91,6 +98,11 @@ const NO_EVENTS_HTML = `<div style="background:#12151d;border:1px solid #20252f;
       <div style="color:#cfd4e0;font-size:14px;margin-bottom:8px;">No custom events in this period.</div>
       <div style="color:#8b92a4;font-size:13px;line-height:1.6;">Fire one from your site with <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia('event', 'signup')")}</code> or <code style="font-family:'JetBrains Mono',monospace;color:#9fb4ff;">${esc("skopia.track('signup')")}</code> — see docs/install.md.</div>
     </div>`;
+
+/** A breakdown view's full page body: its head, then its content. */
+export async function breakdownPage(view: BreakdownView, ctx: ViewCtx): Promise<string> {
+  return pageHead(view.title, ctx.range, "") + (await view.content(ctx));
+}
 
 export const BREAKDOWN_VIEWS: BreakdownView[] = [
   {

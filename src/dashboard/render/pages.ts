@@ -1,7 +1,43 @@
-/** Skopia — standalone pages: login, setup, not-configured, and the share 404. */
+/** Skopia — standalone pages: login, setup, not-configured, and "no sites". */
 
 import { esc } from "./html";
-import { htmlDoc, skopiaLogo } from "./layout";
+import { htmlDoc, INSTALL_GUIDE_URL, MARK } from "./layout";
+
+/**
+ * Signed in, but no site is registered yet. Sites are added out-of-band with
+ * wrangler (there is no add-site UI), so the page says exactly how.
+ */
+export function noSitesPage(nonce: string): string {
+  const cmd = `wrangler d1 execute skopia --remote --command "INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')"`;
+  return htmlDoc(
+    "No sites",
+    `<a class="skip" href="#main">Skip to content</a>
+<header class="bar"><div class="wrap bar-in">
+  <a class="brand" href="/app">${MARK}Skopia</a>
+  <div class="bar-end"><a class="hide-s" href="${INSTALL_GUIDE_URL}">Install guide</a><a href="/logout">Sign out</a></div>
+</div></header>
+<main id="main" class="wrap">
+  <div class="first">
+    <section aria-labelledby="first-h">
+      <h1 id="first-h">No sites tracked yet. Register one and it shows up here.</h1>
+      <p class="say">Skopia is deployed and you are signed in. Sites are added from the command line; there is no add-site screen.</p>
+      <ol class="steps">
+        <li><h2>Register a site in D1</h2>
+          <p>Pick an id; the snippet on your site refers to it as <code>data-site</code>.</p>
+          <div class="snip"><pre id="snippet"><code>${esc(cmd)}</code></pre>
+          <button class="btn btn-quiet js-only" type="button" data-copy="snippet">Copy</button></div>
+        </li>
+        <li><h2>Reload this page</h2>
+          <p>The new site opens with the snippet to paste into its pages.</p></li>
+      </ol>
+      <p class="trouble">The <a href="${INSTALL_GUIDE_URL}">install guide</a> covers the whole setup, including share links.</p>
+    </section>
+  </div>
+</main>
+<footer class="foot"><div class="wrap foot-in"><span><b>Running on your Worker.</b> Your data stays in your Cloudflare account.</span><span>Times are UTC.</span></div></footer>`,
+    nonce,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Login / setup pages
@@ -17,11 +53,10 @@ export function loginPage(nonce: string, error?: string, email?: string): string
   const emailVal = email ? ` value="${esc(email)}"` : "";
   return htmlDoc(
     "Login",
-    "",
     `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
     <div style="width:100%;max-width:360px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
-        ${skopiaLogo()}
+        ${MARK}
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
@@ -57,7 +92,6 @@ export function notConfiguredPage(nonce: string, missing: string[]): string {
     .join(", ");
   return htmlDoc(
     "Not configured",
-    "",
     `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
     <div style="width:100%;max-width:440px;background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">
       <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:18px;color:#fff;margin-bottom:12px;">Not configured</h1>
@@ -91,11 +125,10 @@ export function setupPage(
   const emailVal = email ? ` value="${esc(email)}"` : "";
   return htmlDoc(
     "Setup",
-    "",
     `<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
     <div style="width:100%;max-width:400px;">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:32px;justify-content:center;">
-        ${skopiaLogo()}
+        ${MARK}
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#fff;">Skopia</span>
       </div>
       <div style="background:#12151d;border:1px solid #20252f;border-radius:14px;padding:32px;">

@@ -590,9 +590,13 @@ describe("site switcher", () => {
       req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    expect(text).toContain('id="skopia-site-switcher"');
-    expect(text).toContain('<option value="site-001" selected>test.dev</option>');
-    expect(text).toContain('<option value="site-002">other.dev</option>');
+    // A <details> of plain links (no JS, no inline handlers); the current site
+    // is marked aria-current.
+    expect(text).toContain('id="site-switcher"');
+    expect(text).toContain(
+      '<a href="/app?site=site-001&range=30d" aria-current="true"><span>test.dev</span>',
+    );
+    expect(text).toContain('<a href="/app?site=site-002&range=30d"><span>other.dev</span>');
   });
 
   it("selects the site named by ?site= ", async () => {
@@ -602,8 +606,19 @@ describe("site switcher", () => {
       req("/app?site=site-002", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    expect(text).toContain('<option value="site-002" selected>other.dev</option>');
-    expect(text).toContain('<option value="site-001">test.dev</option>');
+    expect(text).toContain(
+      '<a href="/app?site=site-002&range=30d" aria-current="true"><span>other.dev</span>',
+    );
+    expect(text).toContain('<a href="/app?site=site-001&range=30d"><span>test.dev</span>');
+  });
+
+  it("switcher links keep the current view", async () => {
+    vi.mocked(queries.listSites).mockResolvedValue([MOCK_SITE, MOCK_SITE_2]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain('href="/app/sources?site=site-002&range=7d"');
   });
 
   it("redirects to /app (not the empty state) when ?site= names an unknown site but sites exist", async () => {
@@ -618,17 +633,68 @@ describe("site switcher", () => {
 });
 
 describe("range preservation across nav", () => {
-  it("sidebar nav links and the switcher carry the active range", async () => {
+  it("view tabs carry the active range; range keys keep the view and site", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
-      req("/app?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      req("/app/pages?range=7d", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Navigating Overview → Pages must keep range=7d.
-    expect(text).toContain('href="/app/pages?site=site-001&range=7d"');
+    // Navigating Pages → Sources must keep range=7d.
+    expect(text).toContain('href="/app?site=site-001&range=7d"');
     expect(text).toContain('href="/app/sources?site=site-001&range=7d"');
-    // The switcher remembers the range for its on-change navigation.
-    expect(text).toContain('data-range="7d"');
+    // The range keys are links on the current view.
+    expect(text).toContain('href="/app/pages?site=site-001&range=90d"');
+    expect(text).toContain('href="/app/pages?site=site-001&range=7d" aria-current="true"');
+  });
+});
+
+describe("range keys", () => {
+  it("render only what parseRange serves: no Today, no Custom", async () => {
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const keys = text.slice(text.indexOf('class="keys"'));
+    const labels = [...keys.slice(0, keys.indexOf("</div>")).matchAll(/>([^<]+)<\/a>/g)].map(
+      (m) => m[1],
+    );
+    expect(labels).toEqual(["7 days", "30 days", "90 days"]);
+    expect(text).not.toContain(">Today</a>");
+    expect(text).not.toContain(">Custom<");
+    expect(text).not.toContain('type="date"');
+  });
+});
+
+describe("no hard-coded health badge", () => {
+  it("never renders the old 'd1 ok' / 'Healthy' status block", async () => {
+    const cookieVal = await authedCookie();
+    for (const path of ["/app", "/app/pages", "/app/devices"]) {
+      const { text } = await fetch_(
+        req(path, { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      );
+      expect(text).not.toContain("d1 ok");
+      expect(text).not.toContain("Healthy.");
+    }
+  });
+});
+
+describe("CSP: every <script> carries the request nonce", () => {
+  it("authed views and the /share surface nonce every script tag", async () => {
+    const cookieVal = await authedCookie();
+    const paths = ["/app", "/app/pages", "/app/sources", "/app/geography", "/app/devices"];
+    for (const path of paths) {
+      const { res, text } = await fetch_(
+        req(path, { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+      );
+      const nonce = res.headers.get("content-security-policy")?.match(/'nonce-([a-f0-9]+)'/)?.[1];
+      expect(nonce, path).toBeTruthy();
+      const tags = [...text.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
+      expect(tags.length, path).toBeGreaterThan(0);
+      // strict-dynamic ignores 'self': a <script src> without the nonce is blocked.
+      for (const tag of tags) expect(tag, `${path}: ${tag}`).toContain(`nonce="${nonce}"`);
+      // …and no inline event handlers anywhere.
+      expect(text).not.toMatch(/\son[a-z]+="/);
+    }
   });
 });
 
@@ -871,8 +937,8 @@ describe("/app/devices", () => {
     // The tab bar renders the first four views as tabs only; overflow views
     // render as full-label links inside the <details> More sheet — so Devices
     // must appear after the <details> marker, not before it.
-    const tabbarStart = text.indexOf('class="mobile-tabbar"');
-    const moreStart = text.indexOf('<details class="mobile-more"', tabbarStart);
+    const tabbarStart = text.indexOf('class="tabbar"');
+    const moreStart = text.indexOf('<details class="tab-more"', tabbarStart);
     expect(moreStart).toBeGreaterThan(tabbarStart);
     const tabsSection = text.slice(tabbarStart, moreStart);
     const moreSection = text.slice(moreStart);

@@ -63,7 +63,7 @@
 
   // Static assets (vendored fonts + jsVectorMap) served from public/ on the same
   // Worker (ADR-0005 "SSR + API + static assets"). No `binding`: the Worker never
-  // fetches assets; the asset layer answers only /fonts/* and /vendor/*. HTML
+  // fetches assets; the asset layer answers only /fonts/*, /assets/* and /vendor/*. HTML
   // stays 100% SSR — html_handling/not_found_handling are "none" so the asset
   // layer never intercepts a route.
   "assets": {

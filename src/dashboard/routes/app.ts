@@ -6,10 +6,10 @@ import type { SiteRow } from "../../shared/types";
 import { requireAuth } from "../auth";
 import type { DashEnv } from "../env";
 import { parseRange } from "../range";
-import { esc } from "../render/html";
-import { appLayout, htmlDoc, rangePicker } from "../render/layout";
+import { type Chrome, htmlDoc, shell } from "../render/layout";
 import { liveScript } from "../render/live";
-import { BREAKDOWN_VIEWS, overviewContent, type ViewCtx } from "../views";
+import { noSitesPage } from "../render/pages";
+import { BREAKDOWN_VIEWS, breakdownPage, overviewContent, type ViewCtx } from "../views";
 
 // ---------------------------------------------------------------------------
 // Helper: the full site list + the active site (for the switcher)
@@ -97,18 +97,12 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
     const { sites, site } = await resolveSites(c.env.DB, c.req.query("site"));
     if (!site) return onNoSite(sites);
 
-    const siteHiddenInput = `<input type="hidden" name="site" value="${esc(site.id)}">`;
-    const headerRight = rangePicker(range.key, siteHiddenInput);
-    const body = (await content({ db: c.env.DB, site, range, nonce })) + liveScript(site.id, nonce);
+    const ch: Chrome = { surface: "app", view, site, sites, token: "", rangeKey: range.key };
+    const body =
+      (await content({ db: c.env.DB, site, range, nonce, ch, online: null })) +
+      liveScript(site.id, nonce);
 
-    return c.html(
-      htmlDoc(
-        title(site),
-        "",
-        appLayout(view, sites, site, headerRight, body, nonce, range.key),
-        nonce,
-      ),
-    );
+    return c.html(htmlDoc(title(site), shell(ch, body), nonce));
   };
 
   // Overview
@@ -124,14 +118,7 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
         // view, which does `if (!site) return c.redirect("/app")`) instead of
         // showing the empty-state copy while real sites exist.
         if (sites.length > 0) return c.redirect("/app");
-        return c.html(
-          htmlDoc(
-            "No sites",
-            "",
-            "<div style='padding:60px;text-align:center;color:#8b92a4;line-height:1.6;'>No sites tracked yet.<br>Register one with <code style='color:#9fb4ff;'>wrangler d1 execute skopia --remote --command \"INSERT INTO sites (id,name,domain) VALUES ('my-site','My Site','example.com')\"</code>, then reload.</div>",
-            c.get("nonce"),
-          ),
-        );
+        return c.html(noSitesPage(c.get("nonce")));
       },
     ),
   );
@@ -143,7 +130,7 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
         c,
         view.id,
         (site) => `${view.title} — ${site.name}`,
-        view.content,
+        (ctx) => breakdownPage(view, ctx),
         () => c.redirect("/app"),
       ),
     );

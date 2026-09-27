@@ -8,8 +8,8 @@ import { getSiteByPublicToken } from "../../db/queries";
 import type { LiveSnapshot, SiteRow } from "../../shared/types";
 import type { DashEnv } from "../env";
 import { parseRange, todayUtc } from "../range";
-import { htmlDoc, publicLayout, rangePicker } from "../render/layout";
-import { BREAKDOWN_VIEWS, overviewContent, type ViewCtx } from "../views";
+import { type Chrome, htmlDoc, shell } from "../render/layout";
+import { BREAKDOWN_VIEWS, breakdownPage, overviewContent, type ViewCtx } from "../views";
 
 // ---------------------------------------------------------------------------
 // Public share-link surface: /share/:token — read-only, single-site, no auth
@@ -29,8 +29,8 @@ const SHARE_TOKEN_SHAPE = /^shr_[A-Za-z0-9_-]{43}$/;
 const SHARE_NOT_FOUND_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not Found — Skopia</title></head>
-<body style="margin:0;height:100%;background:#0a0c11;font-family:sans-serif;">
-<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#8b92a4;">Dashboard not found.</div>
+<body style="margin:0;min-height:100vh;background:#e3e5df;color:#3b413b;font:400 16px/1.55 ui-sans-serif,system-ui,sans-serif;">
+<main style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;">Dashboard not found.</main>
 </body>
 </html>`;
 
@@ -220,14 +220,9 @@ export function registerShareRoutes(dashboard: Hono<DashEnv>): void {
 
     return cachedPublicResponse(c, cacheKey, SHARE_CACHE_TTL_SECONDS, async (onlineCount) => {
       const nonce = crypto.randomUUID().replace(/-/g, "");
-      const body = await content({ db: c.env.DB, site, range, nonce });
-      const headerRight = rangePicker(range.key, "");
-      const html = htmlDoc(
-        title(site),
-        "",
-        publicLayout(view, token, site, headerRight, body, nonce, range.key, onlineCount),
-        nonce,
-      );
+      const ch: Chrome = { surface: "share", view, site, sites: [], token, rangeKey: range.key };
+      const body = await content({ db: c.env.DB, site, range, nonce, ch, online: onlineCount });
+      const html = htmlDoc(title(site), shell(ch, body), nonce);
       return { html, nonce };
     });
   };
@@ -246,7 +241,12 @@ export function registerShareRoutes(dashboard: Hono<DashEnv>): void {
   // the views ADR-0012 keeps off the public surface.
   for (const view of BREAKDOWN_VIEWS.filter((v) => v.shared)) {
     dashboard.get(`/share/:token/${view.id}`, (c) =>
-      servePublic(c, view.id, (site) => `${view.title} — ${site.name}`, view.content),
+      servePublic(
+        c,
+        view.id,
+        (site) => `${view.title} — ${site.name}`,
+        (ctx) => breakdownPage(view, ctx),
+      ),
     );
   }
 }
