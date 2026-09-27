@@ -12,6 +12,15 @@
   Cloudflare pricing/limits pulled 2026-07-05 (cited in the cost model). All primitives used
   (Workers, KV, Cache API, D1, Durable Objects) are GA; nothing here is beta.
 
+> **Amendment — 2026-09-27 (instrument-panel redesign, PR #32).** §2 keeps the map
+> app-only because it was "the heaviest view (jsVectorMap vendor JS)". That reason no
+> longer holds: the map is now a server-rendered dot map (a static, cacheable
+> `/assets/map-base.svg` plus the lit countries as inline SVG paths from
+> `src/dashboard/render/map-data.ts`), with no client library and no script. The share
+> Overview therefore shows this static dot map beside its Countries list. It adds no JS,
+> no WebSocket and no new data: the country counts were already public on the overview.
+> The standalone Geography view stays off the public nav, as before.
+
 ## Context
 
 The launch is demo-gated. skopia.dev's own dashboard must be viewable **logged-out** at an
