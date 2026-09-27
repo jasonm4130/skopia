@@ -81,11 +81,30 @@ accepted trade-off (§7).**
   - This rule keeps a **deleted past-day salt from ever being re-minted** by a late or skewed
     request. A re-minted salt would split that day's vids and would also recreate secret
     material the design promised to destroy.
-  - The 5-minute lead tolerates collector clocks that run slightly ahead.
+  - The 5-minute lead tolerates collector clocks that run slightly ahead. It cannot split a
+    visitor, because the rollup day is the collector's designated event day, not the DO's own
+    clock (§1a).
   - `GRACE` replaces the old KV TTL of +1 h. Retention gets shorter, not longer. See the
     note on the collector memo in §2.
 - The salt is still 32 bytes from `crypto.getRandomValues`, hex-encoded. Only where it is
   created and stored moves.
+
+### 1a. One designated event day, end to end
+
+The collector computes `day = utcDay(receiptTime)` **once** per beacon and uses that same value
+for three things: the `getSalt(day)` call, the memo key, and a new `day` field in the DO
+`/event` body. `SiteLive.recordEvent()` stops deriving the rollup day from its own
+`utcDay(new Date())` (`site-live.ts:173`) and uses `e.day` instead.
+
+- **Why.** Otherwise a beacon received at 23:59:59.9 on day D gets D's salt (inside `GRACE`)
+  but is rolled up under D+1 by the DO's clock. The next D+1 beacon from the same visitor uses
+  D+1's salt, so one person becomes two vids inside D+1's rollup. Carrying one day through
+  identity and rollup makes the salt and the bucket agree by construction.
+- **Validation in the DO.** `recordEvent` accepts `e.day` only if a salt row for `e.day` exists
+  in this DO (that is, the day was issued a salt here and has not been deleted). Otherwise it
+  drops the event and logs it. This also rejects forged or stale days: a day whose salt has
+  been deleted can never gain new rollup rows.
+- The WAE point carries the same `day` implicitly through its timestamp; no WAE schema change.
 
 ### 2. Collector memo
 
@@ -118,20 +137,28 @@ helper, `armBy(t)`: `cur = await getAlarm(); if (cur === null || cur > t) await 
   sit un-flushed until the salt deadline. That would not lose data (the state is durable per
   ADR-0010), but the dashboard would go stale for hours.
 - **`getSalt`**, when it mints a salt, calls `armBy(end(day) + GRACE)`.
-- **`alarm()`** keeps its existing steps: flush, evict stale live visitors, prune `seen`. It
-  then deletes every salt whose `end(day) + GRACE <= now`. Finally it re-arms at
-  `min(pending > 0 ? now + 15 s : ∞, earliest remaining salt deadline)` if that value is
-  finite.
-  - The salt delete is idempotent, which is safe because alarms have "guaranteed
-    at-least-once execution and are retried automatically when the `alarm()` handler throws
-    … exponential backoff starting at a 2 second delay … up to 6 retries" (Alarms doc).
+- **`alarm()`** runs the expired-salt `DELETE` **first**, in its own `try`, before any other
+  step: every salt whose `end(day) + GRACE <= now` is removed. It then runs its existing steps
+  (flush, evict stale live visitors, prune `seen`), each failure caught and logged rather than
+  thrown. It **always** re-arms before returning, in a `finally`: at
+  `min(pending > 0 ? now + 15 s : ∞, earliest remaining salt deadline)`, and if the salt
+  `DELETE` itself failed, at `now + 60 s` so deletion is retried.
+  - **Why not rely on platform retries.** Alarms are retried "up to 6 retries" with
+    exponential backoff when `alarm()` throws, then dropped (Alarms doc), and Cloudflare's
+    guidance is to catch and schedule a new alarm instead. If a D1 outage made the flush throw
+    for all six retries, a salt delete sequenced after it would never run, and on a site with
+    no further traffic nothing would re-arm it. Salt deletion must not depend on D1 health.
+  - The salt delete is idempotent and synchronous SQLite; it is the step least likely to fail,
+    which is why it goes first.
 - **Constructor rehydrate** already arms a flush when it finds `pending` with no alarm. It now
   also runs `armBy(earliest salt deadline)` whenever a salt row exists.
 - **Lazy backstop.** `getSalt` and `handleEvent` also run the same expired-salt `DELETE`, which
   is synchronous and writes 0 rows when nothing matches.
   - The alarm is the primary deletion path. It covers a site that gets no traffic after
     midnight, which the human explicitly required.
-  - The lazy path covers the case where the alarm has used up its 6 retries and been dropped.
+  - The lazy path is a second line only. Because `alarm()` always re-arms (above), the alarm is
+    not expected to be dropped; the lazy path covers a DO that was evicted between arming and
+    firing and is then woken by traffic.
 - **Cost of the multiplexing.**
   - `setAlarm()` is billed as one row written
     ([DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)).
@@ -169,7 +196,13 @@ because mixing salts is exactly the bug this ADR fixes.
 - This failure only affects isolates that have not yet memoized the day's salt. Isolates that
   already have it keep working during a DO outage, and during such an outage the rollup
   delivery would fail anyway.
-- Log each salt failure so the rate can be monitored.
+- **A stalled fetch is a failure too.** The collector races `getSalt` against a **5 s
+  timeout**. On timeout it takes the same path as a thrown error: WAE point with `vid = ""`,
+  no DO delivery. Without the timeout, an RPC that never settles is cancelled when
+  `ctx.waitUntil` hits its 30 s limit, the catch never runs, and the event is lost from WAE as
+  well. 5 s is far above a healthy first-access round trip ("up to a few hundred
+  milliseconds") and leaves 25 s of budget for the WAE write.
+- Log each salt failure (error, timeout, or `.overloaded`) so the rate can be monitored.
 
 ### 5. Beacon latency: identity work moves into `ctx.waitUntil`
 
@@ -194,6 +227,12 @@ there (§4).
 - **Error handling moves too.** The async task must `catch` and log on its own, because it runs
   outside the handler's try/catch.
 - The deliberate non-204 responses (404, 403, 413, 503) stay synchronous, as they are today.
+- **This amends the synchronous-WAE contract.** ADR-0002 and the technical spec
+  (`docs/specs/2026-06-21-technical-spec.md` §3, step 12 "Write to WAE (synchronous)") state
+  that the WAE write happens before the 204. After this ADR it happens in `waitUntil`, so a
+  Worker crash or `waitUntil` cancellation after the 204 can now lose the WAE point too. The
+  §4 timeout keeps the one foreseeable stall inside the budget; the residual loss (runtime
+  eviction mid-task) is accepted, and both documents are updated in the implementation PR.
 
 ### 6. Binding removal and rollout for existing deploys
 
@@ -394,6 +433,17 @@ whether fake timers reach DO code.
 9. **Replace** the KV-specific tests: `test/identity.test.ts` `getDailySalt` and
    `test/collector.test.ts:744` (`env.SALT` spy). The collector test instead asserts one DO
    `getSalt` per (site, day) per isolate.
+10. **Salt deletion survives a failing flush.** Make the D1 flush throw on every alarm run,
+    record no further traffic, advance past `end(D) + GRACE`, and run the alarm: D's salt row
+    is gone, the alarm did not throw, and an alarm is still armed (flush retry or salt
+    deadline). Also force the salt `DELETE` to fail once: the alarm re-arms at `now + 60 s`
+    and the next run deletes it.
+11. **One event day end to end.** A beacon whose receipt time is 23:59:59 UTC on day D, with
+    the DO clock already on D+1: the salt used is D's, and the rollup row lands under D, not
+    D+1. An event whose `day` has no salt row in the DO is dropped and not rolled up.
+12. **Stalled fetch.** Stub `getSalt` to never settle: after the 5 s timeout the WAE point is
+    written with blob1 `""`, no DO `/event` is delivered, and the task settles well inside the
+    30 s `waitUntil` limit.
 
 ## Recorded risks and monitoring
 
@@ -406,10 +456,10 @@ binding there.
 The remaining risks below are accepted and monitored. The original R-numbers are kept so
 earlier references still resolve.
 
-- **R2: The collector and the DO each decide the day with their own clocks.** An event minted
-  with collector-day D can be counted in `seen` under DO-day D+1 within milliseconds of
-  midnight. This already happens today and is negligible. The validity window in §1 absorbs
-  skew for salt issuance. Not fixing it.
+- **R2 (resolved by §1a): two clocks.** The draft let the collector pick the salt day and the
+  DO pick the rollup day independently, which could split a visitor near midnight. §1a now
+  carries one designated day from the collector through identity and rollup, and the DO only
+  accepts days it holds a salt for.
 - **R3: Worst-case doubling of DO requests on the Free plan.** Low-traffic sites may hit fresh
   isolates on most beacons, so the memo hit rate could approach 0 and DO requests approach 2×
   events.
