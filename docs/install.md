@@ -13,7 +13,7 @@ from `wrangler.jsonc`:
 | KV namespaces (cache + salt) | Auto-provisioned by the button |
 | Durable Object (SiteLive) | Provisioned via DO migration |
 | Workers Analytics Engine dataset | Created on first write — nothing to do |
-| Static assets (fonts + vendor JS) | Shipped with the Worker — nothing to provision |
+| Static assets (fonts, dashboard JS, map) | Shipped with the Worker — nothing to provision |
 
 **The button will prompt you for four secrets** (declared in `package.json`
 `cloudflare.bindings`). Generate them before you click:

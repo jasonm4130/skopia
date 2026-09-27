@@ -21,6 +21,7 @@
  */
 
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { parse } from "node-html-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -765,19 +766,19 @@ describe("sampled data badge", () => {
 // ---------------------------------------------------------------------------
 
 describe("breakdown table honesty (Task 9)", () => {
-  it("Visitors column header carries the same daily-counted-once caveat as Overview", async () => {
+  it("Visitors column header links the same daily-counted-once caveat as Overview", async () => {
     const cookieVal = await authedCookie();
     const { res, text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    const visitorsHeaderIdx = text.indexOf(">Visitors<");
-    expect(visitorsHeaderIdx).toBeGreaterThan(-1);
-    const headerSnippet = text.slice(Math.max(0, visitorsHeaderIdx - 400), visitorsHeaderIdx);
-    expect(headerSnippet).toContain("counted once per day");
+    const root = parse(text);
+    const th = root.querySelectorAll("table.bd thead th").find((h) => h.text.includes("Visitors"));
+    expect(th?.querySelector('a[href="#fn-1"]')).toBeTruthy();
+    expect(root.querySelector("#fn-1")?.text).toContain("A visitor counts once per day");
   });
 
-  it("renders the ~est badge on a row whose sampled flag is set, not on unsampled rows", async () => {
+  it("marks a sampled row with ≈, not unsampled rows", async () => {
     const sampledRow: BreakdownRow = {
       label: "/sampled-page",
       pageviews: 900,
@@ -790,25 +791,76 @@ describe("breakdown table honesty (Task 9)", () => {
     const { text } = await fetch_(
       req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    const sampledRowStart = text.indexOf("/sampled-page");
-    expect(sampledRowStart).toBeGreaterThan(-1);
-    expect(text.slice(sampledRowStart, sampledRowStart + 800)).toContain("~est");
+    const rows = parse(text).querySelectorAll("table.bd tbody tr");
+    const row = (label: string) => rows.find((r) => r.querySelector("th")?.text.includes(label));
+    expect(row("/sampled-page")?.querySelector(".est")).toBeTruthy();
+    expect(row("/home")?.querySelector(".est")).toBeFalsy();
+  });
 
-    const homeRowStart = text.indexOf("/home");
-    expect(homeRowStart).toBeGreaterThan(-1);
-    expect(text.slice(homeRowStart, homeRowStart + 800)).not.toContain("~est");
+  it("full tables foot with 'Rows added up' and 'Site total', flagging an over-sum", async () => {
+    vi.mocked(queries.getTopPages).mockResolvedValue([
+      ...MOCK_BREAKDOWN,
+      { label: "/docs", pageviews: 500, visitors: 300, share: 0.1, sampled: false },
+    ]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/pages", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const foot = parse(text).querySelectorAll("table.bd tfoot tr");
+    expect(foot[0]?.querySelector("th")?.text).toBe("Rows added up");
+    expect(foot[0]?.text).toContain("1,500*");
+    expect(foot[1]?.querySelector("th")?.text).toBe("Site total");
+    expect(foot[1]?.text).toContain("1,200");
+    expect(text).toContain("marks the column each list is ordered by");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Geography map JSON safety (Task 9): jsonForScript must neutralize
-// "</script>" inside a country label before it lands inline in a <script>
-// block. Not exploitable today (cf.country is trusted), but the escaping
-// must hold for any value routed through this helper.
+// Sources page: the (direct) definition depends on site.domain — the
+// collector folds same-site referrers into (direct) only when it is set.
 // ---------------------------------------------------------------------------
 
-describe("geography map JSON safety (jsonForScript, Task 9)", () => {
-  it("escapes </script> inside a country label instead of leaking it verbatim", async () => {
+describe("sources (direct) definition", () => {
+  const DIRECT: BreakdownRow = {
+    label: "(direct)",
+    pageviews: 10,
+    visitors: 5,
+    share: 1,
+    sampled: false,
+  };
+
+  it("counts clicks between your own pages as (direct) when the site has a domain", async () => {
+    vi.mocked(queries.getTopSources).mockResolvedValue([DIRECT]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).toContain(
+      "every pageview without an outside referrer: a typed address, a bookmark, an app that withholds it, or a click between your own pages",
+    );
+  });
+
+  it("says own-page clicks show under the hostname when the site has no domain", async () => {
+    const noDomain = { ...MOCK_SITE, domain: "" };
+    vi.mocked(queries.listSites).mockResolvedValue([noDomain]);
+    vi.mocked(queries.getSite).mockResolvedValue(noDomain);
+    vi.mocked(queries.getTopSources).mockResolvedValue([DIRECT]);
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app/sources", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    expect(text).not.toContain("or a click between your own pages");
+    expect(text).toContain("Clicks between your own pages show up under your own hostname");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Geography: a hostile country label is escaped as HTML, and no inline
+// script carries data any more (the dot map is static SVG).
+// ---------------------------------------------------------------------------
+
+describe("geography label safety", () => {
+  it("escapes markup inside a country label", async () => {
     const evilRow: BreakdownRow = {
       label: "</script><img src=x>",
       pageviews: 10,
@@ -822,12 +874,8 @@ describe("geography map JSON safety (jsonForScript, Task 9)", () => {
       req("/app/geography", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
     expect(res.status).toBe(200);
-    // Plain JSON.stringify would emit this literally inside the inline
-    // <script> block, letting the string's own "</script>" close the tag.
-    expect(text).not.toContain("</script><img src=x>");
-    // jsonForScript escapes the angle brackets to literal < / >
-    // text, which stays valid JSON/JS but can no longer close the tag.
-    expect(text).toContain("\\u003c/script\\u003e\\u003cimg src=x\\u003e");
+    expect(text).not.toContain("<img src=x>");
+    expect(text).toContain("&lt;img src=x&gt;");
   });
 });
 
@@ -1028,7 +1076,7 @@ describe("/app/events", () => {
     const { text } = await fetch_(
       req("/app/events", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
     );
-    expect(text).toContain("No custom events in this period");
+    expect(text).toContain("No custom events in this range");
     expect(text).toContain("skopia(&#39;event&#39;");
   });
 

@@ -1,6 +1,6 @@
 // Fail the build if any source file references a known third-party host. The
 // privacy thesis requires ZERO third-party requests from rendered pages (plan
-// Task 3); fonts + jsVectorMap are vendored under public/. Scans src/ ONLY —
+// Task 3); fonts are vendored and dashboard assets live under public/. Scans src/ ONLY —
 // vendored files under public/ are the allowed self-hosted copies.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
