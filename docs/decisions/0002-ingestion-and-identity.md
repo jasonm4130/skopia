@@ -30,7 +30,13 @@ sit in the default path (PM Q4). Verified constraints: granular bot scores are E
    to 16 hex. **Raw IP is never written.** Daily salt in KV, rotated at UTC midnight by the Cron
    Worker (yesterday's salt deleted → cross-day correlation impossible). Site-scoped salt → the
    same visitor on two sites is unlinkable.
+   *Amended by [ADR-0013](0013-do-owned-daily-salt.md): the daily salt is a per-site random value
+   owned by that site's `SiteLive` DO, created on first use, deleted by the DO alarm about 10 min
+   after its UTC day ends. (Until 0013 the salt was in fact one global value per day; unlinkability
+   across sites came from `site_id` in the HMAC message.)*
 6. **Write to WAE** synchronously (`env.WAE.writeDataPoint`, one data point per event).
+   *Amended by ADR-0013 §5: steps 5–7 now run in one `ctx.waitUntil` task after the 204, so the
+   WAE write is no longer synchronous; a failed salt fetch still writes WAE with an empty vid.*
 7. **Bump live count** via `ctx.waitUntil(SITE_LIVE.fetch('/hit'))` — async, non-blocking.
 8. **Respond 204.**
 
@@ -63,7 +69,7 @@ the live-count bump is `waitUntil`).
 
 **Hard / watch:** heuristic bot filtering is imperfect (the honest position — bot handling is a
 nice-to-have, not the moat). Daily-salt rotation is a Cron dependency; if it fails, uniques skew
-(monitor it). Direct WAE write has no buffer — acceptable because WAE write is cheap and lossy-
+(monitor it). *(Superseded by ADR-0013: salt availability is now a `SiteLive` DO dependency.)* Direct WAE write has no buffer — acceptable because WAE write is cheap and lossy-
 tolerant for analytics, but if WAE write reliability ever became load-bearing we'd revisit Queues.
 The per-site origin allowlist is our hardening choice beyond the CF CORS example (⚠️) — adds a tiny
 config surface per site.

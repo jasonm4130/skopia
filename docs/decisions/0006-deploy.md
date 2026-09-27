@@ -20,9 +20,9 @@ self-rolled auth).
 **Ship a "Deploy to Cloudflare" button + a `wrangler.jsonc` that auto-provisions everything the
 button can, and reduce manual steps to the absolute minimum by choosing self-rolled auth.**
 
-Auto-provisioned by the button from `wrangler.jsonc`: **D1, KV (cache + salt), Durable Object
-(SiteLive via migration).** **WAE dataset** auto-creates on first write (declare binding only).
-Workers Builds CI/CD is wired automatically.
+Auto-provisioned by the button from `wrangler.jsonc`: **D1, KV (cache; the salt namespace was
+removed by ADR-0013), Durable Object (SiteLive via migration).** **WAE dataset** auto-creates on
+first write (declare binding only). Workers Builds CI/CD is wired automatically.
 
 **Secrets** (`IDENTITY_HMAC_SECRET`, `AUTH_COOKIE_SECRET`) are generated on first run (or prompted
 via `.dev.vars.example`); the README documents generating them with a one-liner.

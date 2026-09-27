@@ -2,10 +2,12 @@
  * Skopia — collector (the ingestion hot path).
  *
  * Routed at `OPTIONS /e` (CORS preflight) and `POST /e` (beacon). Pipeline per
- * the spec §3: CORS allowlist -> validate -> bot drop -> enrich -> cookieless
- * identity -> `WAE.writeDataPoint` -> bump SiteLive DO via waitUntil -> 204.
+ * the spec §3: CORS allowlist -> validate -> bot drop -> enrich -> 204, then in
+ * one waitUntil task (ADR-0013 §5): cookieless identity -> `WAE.writeDataPoint`
+ * -> bump SiteLive DO.
  */
 
+import type { SiteLive } from "../dashboard/site-live";
 import {
   bucketScreenWidth,
   enrichFromCf,
@@ -15,7 +17,7 @@ import {
   parseUtm,
 } from "../shared/cf";
 import { requireSecrets, SecretsMissingError } from "../shared/config";
-import { deriveVid, getDailySalt, utcDay } from "../shared/identity";
+import { deriveVid, utcDay } from "../shared/identity";
 import type { Beacon, Env, WaeEvent } from "../shared/types";
 import { WAE_BLOB_SLOTS, WAE_DOUBLE_SLOTS } from "../shared/types";
 
@@ -32,8 +34,8 @@ const CORS_HEADERS_BASE = {
 // ---------------------------------------------------------------------------
 // Task 7: per-isolate hot-path caches
 //
-// Every beacon paid an uncached D1 site lookup and a KV salt read, both
-// constant per isolate (site config) or per day (salt). A module-level cache
+// Every beacon paid an uncached D1 site lookup and a salt read, both constant
+// per isolate (site config) or per (site, day) (salt). A module-level cache
 // bounds each to one read per TTL window, per isolate. Consequence: an
 // allowlist/domain edit takes effect within <=60s on any given isolate —
 // acceptable for the collector hot path. Negative lookups (unknown site) are
@@ -46,7 +48,14 @@ const SITE_CACHE_TTL_MS = 60_000;
 const SITE_CACHE_MAX = 1024;
 const siteCache = new Map<string, { site: SiteInfo | null; at: number }>();
 
-let saltMemo: { day: string; salt: string } | null = null;
+/**
+ * Per-site salt memo (ADR-0013 §2): siteId -> that site's salt for `day`.
+ * Bounded like siteCache, and emptied of other days whenever the day changes so
+ * yesterday's salt doesn't outlive its day in isolate RAM. Only sites that
+ * passed the D1 existence + origin checks reach it.
+ */
+const saltMemo = new Map<string, { day: string; salt: Promise<string> }>();
+let saltMemoDay: string | null = null;
 
 /**
  * Fetch the per-site origin allowlist + domain from D1 in one query.
@@ -91,12 +100,68 @@ async function getSiteAllowlist(env: Env, siteId: string): Promise<SiteInfo | nu
   return site;
 }
 
-/** Day-keyed memo over {@link getDailySalt}: one KV `get` per day, per isolate. */
-async function getCachedDailySalt(env: Env, day: string): Promise<string> {
-  if (saltMemo && saltMemo.day === day) return saltMemo.salt;
-  const salt = await getDailySalt(env.SALT, day);
-  saltMemo = { day, salt };
+/** getSalt budget: past it the beacon takes the failure path (ADR-0013 §4). */
+const SALT_TIMEOUT_MS = 5_000;
+
+/** The site's `SiteLive` DO, typed for RPC. */
+function siteLiveStub(env: Env, siteId: string): DurableObjectStub<SiteLive> {
+  return env.SITE_LIVE.get(env.SITE_LIVE.idFromName(siteId)) as DurableObjectStub<SiteLive>;
+}
+
+/** One `getSalt` RPC to the site's DO per (site, day), per isolate (ADR-0013 §2). */
+function getCachedSalt(env: Env, siteId: string, day: string): Promise<string> {
+  if (day !== saltMemoDay) {
+    for (const [id, entry] of saltMemo) {
+      if (entry.day !== day) saltMemo.delete(id);
+    }
+    saltMemoDay = day;
+  }
+  const hit = saltMemo.get(siteId);
+  if (hit && hit.day === day) return hit.salt;
+
+  // Miss rate is the R3 metric (DO requests ≈ events + misses on Free).
+  console.log("collector: salt memo miss", { siteId, day });
+  // Memoize the in-flight promise: concurrent beacons on a cold isolate share
+  // one RPC. A failed fetch is evicted so the next beacon retries.
+  const salt = fetchSalt(env, siteId, day);
+  if (saltMemo.size >= SITE_CACHE_MAX && !saltMemo.has(siteId)) saltMemo.clear();
+  saltMemo.set(siteId, { day, salt });
+  salt.catch(() => {
+    if (saltMemo.get(siteId)?.salt === salt) saltMemo.delete(siteId);
+  });
   return salt;
+}
+
+/**
+ * One `getSalt` RPC raced against SALT_TIMEOUT_MS, so a stalled call fails
+ * inside the waitUntil budget instead of being cancelled with the WAE point. A
+ * `.retryable` error is retried once on a fresh stub (getSalt is idempotent);
+ * `.overloaded` never is (Cloudflare DO error-handling guidance).
+ */
+async function fetchSalt(env: Env, siteId: string, day: string): Promise<string> {
+  const attempt = async (): Promise<string> => {
+    try {
+      return await siteLiveStub(env, siteId).getSalt(day);
+    } catch (err) {
+      const e = err as { retryable?: boolean; overloaded?: boolean } | null;
+      if (e?.retryable === true && e.overloaded !== true) {
+        return siteLiveStub(env, siteId).getSalt(day);
+      }
+      throw err;
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`getSalt timed out after ${SALT_TIMEOUT_MS} ms`)),
+      SALT_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([attempt(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Lowercase and strip one leading "www." for host-vs-host comparison. */
@@ -308,14 +373,14 @@ export async function handleCollect(
       throw err;
     }
 
-    // ---------- 9. Cookieless identity ----------
+    // ---------- 9. Cookieless identity inputs ----------
     const ip =
       request.headers.get("CF-Connecting-IP") ??
       request.headers.get("X-Forwarded-For") ??
       "0.0.0.0";
-    const today = utcDay(new Date());
-    const salt = await getCachedDailySalt(env, today);
-    const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
+    // The one designated event day (ADR-0013 §1a): computed once at receipt and
+    // used for the salt, the WAE blob14 and the DO rollup bucket alike.
+    const day = utcDay(new Date());
 
     // ---------- 10. Parse client-supplied fields ----------
     // Task 4: internal navigations must not credit the site as its own referrer
@@ -344,11 +409,11 @@ export async function handleCollect(
       propsJson = raw.length <= MAX_PROPS_JSON_BYTES ? raw : "";
     }
 
-    // ---------- 11. Build WAE event ----------
+    // ---------- 11. Build WAE event (vid filled in by step 12) ----------
     const isPageview = beacon.t === "pv" ? 1 : 0;
     const waeEvent: WaeEvent = {
       siteId,
-      vid,
+      vid: "",
       pathname: path,
       referrerHost,
       utmSource: utm.source,
@@ -361,49 +426,70 @@ export async function handleCollect(
       eventName,
       entryPath: path, // MVP: entry path = current path (no session tracking)
       propsJson,
+      eventDay: day,
       count: 1,
       isPageview: isPageview as 0 | 1,
       screenWidth: screenWidth ?? 0,
     };
 
-    // ---------- 12. Write to WAE (synchronous) ----------
-    env.WAE.writeDataPoint(toDataPoint(waeEvent));
-
-    // ---------- 13. Bump SiteLive DO (async, non-blocking) ----------
-    // One DO call per event drives BOTH the live count and the dimensional rollup
-    // (spec §3). The DO reads a JSON body — query-string params are not used.
-    const doId = env.SITE_LIVE.idFromName(siteId);
-    const doStub = env.SITE_LIVE.get(doId);
-    const eventBody = JSON.stringify({
-      siteId,
-      vid,
-      isPageview,
-      path,
-      referrer: referrerHost,
-      utmSource: utm.source,
-      utmMedium: utm.medium,
-      utmCampaign: utm.campaign,
-      country: cf.country,
-      device: deviceClass,
-      browser: uaInfo.browser,
-      os: uaInfo.os,
-      eventName,
-    });
+    // ---------- 12-13. Salt -> vid -> WAE -> SiteLive DO, after the 204 ----------
+    // ADR-0013 §5: the first salt fetch per isolate is a cross-colo DO round
+    // trip, so all identity work runs in one waitUntil task. The 204 never meant
+    // "written". The task catches on its own — it runs outside this try/catch.
     ctx.waitUntil(
-      doStub
-        .fetch(
-          new Request("https://do-internal/event", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: eventBody,
-          }),
-        )
-        .catch(() => {
-          // Bounded, accepted loss (ADR-0011): the cron reconciler is retired,
-          // so a dropped DO delivery is no longer self-healed automatically.
-          // WAE still retains the raw events, so any affected day can be
-          // recomputed manually from WAE if a parity spot-check ever shows loss.
-        }),
+      (async () => {
+        let salt: string;
+        try {
+          salt = await getCachedSalt(env, siteId, day);
+        } catch (err) {
+          // ADR-0013 §4: never fall back to another salt. Keep the raw event in
+          // WAE with an empty vid (pageviews stay recomputable; a visitor
+          // recompute must exclude blob1 = '') and skip the DO, whose `seen`
+          // set needs a real vid.
+          console.error("collector: salt fetch failed", err);
+          env.WAE.writeDataPoint(toDataPoint(waeEvent));
+          return;
+        }
+        const vid = await deriveVid(env.IDENTITY_HMAC_SECRET, salt, ip, ua, siteId);
+        waeEvent.vid = vid;
+        env.WAE.writeDataPoint(toDataPoint(waeEvent));
+
+        // One DO call per event drives BOTH the live count and the dimensional
+        // rollup (spec §3). The DO reads a JSON body — query-string params are
+        // not used.
+        const eventBody = JSON.stringify({
+          siteId,
+          day,
+          vid,
+          isPageview,
+          path,
+          referrer: referrerHost,
+          utmSource: utm.source,
+          utmMedium: utm.medium,
+          utmCampaign: utm.campaign,
+          country: cf.country,
+          device: deviceClass,
+          browser: uaInfo.browser,
+          os: uaInfo.os,
+          eventName,
+        });
+        await siteLiveStub(env, siteId)
+          .fetch(
+            new Request("https://do-internal/event", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: eventBody,
+            }),
+          )
+          .catch(() => {
+            // Bounded, accepted loss (ADR-0011): the cron reconciler is retired,
+            // so a dropped DO delivery is no longer self-healed automatically.
+            // WAE still retains the raw events, so any affected day can be
+            // recomputed manually from WAE if a parity spot-check ever shows loss.
+          });
+      })().catch((err) => {
+        console.error("collector: identity task failed", err);
+      }),
     );
 
     // ---------- 14. Respond 204 ----------

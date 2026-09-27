@@ -1,6 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { CountEvent } from "../src/dashboard/event-dimensions";
+import type { SiteLive } from "../src/dashboard/site-live";
 import { utcDay } from "../src/shared/identity";
 import { applyMigrations } from "./apply-migrations";
 
@@ -18,6 +19,7 @@ beforeAll(async () => {
 function evt(overrides: Partial<CountEvent> = {}): CountEvent {
   return {
     siteId: "do-site",
+    day: utcDayUTC(),
     vid: "vid-aaaa",
     isPageview: 1,
     path: "/x",
@@ -36,13 +38,25 @@ function evt(overrides: Partial<CountEvent> = {}): CountEvent {
 
 // Distinct DO id per test keeps SQLite + RAM isolated.
 function stubFor(name: string) {
-  return env.SITE_LIVE.get(env.SITE_LIVE.idFromName(name));
+  return env.SITE_LIVE.get(env.SITE_LIVE.idFromName(name)) as DurableObjectStub<SiteLive>;
+}
+
+/**
+ * Give a DO a salt row for each day, as the collector's getSalt would first:
+ * recordEvent accepts only days holding a salt here (ADR-0013 §1a).
+ */
+function seedSalt(instance: unknown, ...days: string[]): void {
+  const { sql } = (instance as { ctx: { storage: { sql: SqlStorage } } }).ctx.storage;
+  for (const d of days.length > 0 ? days : [utcDayUTC()]) {
+    sql.exec("INSERT OR IGNORE INTO salt (day, salt) VALUES (?, ?)", d, "test-salt");
+  }
 }
 
 describe("SiteLive.recordEvent", () => {
   it("accumulates pending pageview deltas and writes the seen set", async () => {
     const stub = stubFor("rec-1");
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         pending: Map<string, { dimension: string; dimValue: string; delta: number }>;
@@ -71,6 +85,7 @@ describe("SiteLive.recordEvent", () => {
   it("custom events add to seen but contribute 0 pageviews to pageview dims", async () => {
     const stub = stubFor("rec-2");
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         pending: Map<string, { dimension: string; dimValue: string; delta: number }>;
@@ -89,6 +104,7 @@ describe("SiteLive.flush", () => {
     const stub = stubFor("flush-1");
     const day = utcDayUTC();
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         flush(): Promise<void>;
@@ -112,6 +128,7 @@ describe("SiteLive.flush", () => {
   it("clears pending after a successful flush (second flush is a no-op)", async () => {
     const stub = stubFor("flush-2");
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         flush(): Promise<void>;
@@ -137,6 +154,7 @@ describe("SiteLive day rollover", () => {
     vi.useFakeTimers();
     try {
       await runInDurableObject(stub, async (instance) => {
+        seedSalt(instance, d0, d1);
         const i = instance as unknown as {
           recordEvent(e: CountEvent): Promise<void>;
           alarm(): Promise<void>;
@@ -195,6 +213,7 @@ describe("SiteLive day rollover", () => {
     vi.useFakeTimers();
     try {
       await runInDurableObject(stub, async (instance) => {
+        seedSalt(instance, d0, d1);
         const i = instance as unknown as {
           recordEvent(e: CountEvent): Promise<void>;
           alarm(): Promise<void>;
@@ -290,6 +309,7 @@ describe("SiteLive day rollover", () => {
 describe("SiteLive /event + alarm", () => {
   it("POST /event updates the live map and records counters in one call", async () => {
     const stub = stubFor("ev-1");
+    await stub.getSalt(utcDayUTC());
     const body = JSON.stringify(evt({ vid: "v1", path: "/home" }));
     const res = await stub.fetch("https://do-internal/event", {
       method: "POST",
@@ -310,6 +330,7 @@ describe("SiteLive /event + alarm", () => {
 
   it("alarm flushes pending counters to the shadow table", async () => {
     const stub = stubFor("ev-2");
+    await stub.getSalt(utcDayUTC());
     const day = utcDayUTC();
     await stub.fetch("https://do-internal/event", {
       method: "POST",
@@ -339,6 +360,7 @@ describe("SiteLive durability across hibernation", () => {
   it("persists flush state to durable storage on every event", async () => {
     const stub = stubFor("dur-1");
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         ctx: { storage: { get(k: string): Promise<unknown> } };
@@ -362,6 +384,7 @@ describe("SiteLive durability across hibernation", () => {
     const stub = stubFor("dur-2");
     const day = utcDayUTC();
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         rehydrate(): Promise<void>;
@@ -394,6 +417,7 @@ describe("SiteLive durability across hibernation", () => {
     const stub = stubFor("dur-3");
     const day = utcDayUTC();
     await runInDurableObject(stub, async (instance) => {
+      seedSalt(instance);
       const i = instance as unknown as {
         recordEvent(e: CountEvent): Promise<void>;
         rehydrate(): Promise<void>;
@@ -449,6 +473,7 @@ describe("SiteLive subtractive chunk-committed flush", () => {
 
     try {
       await runInDurableObject(stub, async (instance) => {
+        seedSalt(instance);
         const i = instance as unknown as {
           recordEvent(e: CountEvent): Promise<void>;
           flush(): Promise<void>;
@@ -492,6 +517,7 @@ describe("SiteLive subtractive chunk-committed flush", () => {
 
     try {
       await runInDurableObject(stub, async (instance) => {
+        seedSalt(instance);
         const i = instance as unknown as {
           recordEvent(e: CountEvent): Promise<void>;
           alarm(): Promise<void>;
@@ -539,8 +565,9 @@ describe("SiteLive subtractive chunk-committed flush", () => {
 // now reschedules on `pending.size > 0` alone; staleness is evicted lazily on
 // read (`currentSnapshot()`), so the live count is still correct at every read.
 describe("SiteLive alarm reschedule + lazy eviction (Task 3)", () => {
-  it("does not re-arm the alarm once nothing is pending, even with a live visitor connected", async () => {
+  it("does not re-arm the flush tick once nothing is pending, even with a live visitor connected", async () => {
     const stub = stubFor("alarm-tail-1");
+    await stub.getSalt(utcDayUTC());
     const site = "alarm-tail-1-site";
     await stub.fetch("https://do-internal/event", {
       method: "POST",
@@ -557,12 +584,14 @@ describe("SiteLive alarm reschedule + lazy eviction (Task 3)", () => {
       };
       expect(i.pending.size).toBe(0);
       expect(i.visitors.size).toBe(1); // still live — nothing evicted it
-      expect(await i.ctx.storage.getAlarm()).toBeNull(); // no reschedule tail
+      // No flush-tick tail: only the salt deadline stays armed (ADR-0013 §3).
+      expect(await i.ctx.storage.getAlarm()).toBe(saltDeadline(utcDayUTC()));
     });
   });
 
   it("evicts a stale visitor lazily on snapshot, without any alarm having run", async () => {
     const stub = stubFor("lazy-evict-1");
+    await stub.getSalt(utcDayUTC());
     const site = "lazy-evict-1-site";
     vi.useFakeTimers();
     try {
@@ -598,6 +627,7 @@ describe("SiteLive alarm reschedule + lazy eviction (Task 3)", () => {
 describe("SiteLive alarm evicts stale visitors on the busy-site path", () => {
   it("prunes past-TTL visitors during a flush alarm with no dashboard connected", async () => {
     const stub = stubFor("alarm-sweep-1");
+    await stub.getSalt(utcDayUTC());
     const site = "alarm-sweep-1-site";
     await stub.fetch("https://do-internal/event", {
       method: "POST",
@@ -622,6 +652,255 @@ describe("SiteLive alarm evicts stale visitors on the busy-site path", () => {
       const i = instance as unknown as { visitors: Map<string, unknown> };
       expect(i.visitors.has("v1")).toBe(false);
       expect(i.visitors.has("v2")).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0013: the SiteLive DO owns each site's daily identity salt.
+// Tests drive the DO's clock through the injectable `clock` so day boundaries
+// don't depend on whether fake timers reach DO code. Days are chosen in the
+// real future so an armed salt-deadline alarm never fires on its own mid-test.
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const GRACE_MS = 10 * 60 * 1000;
+
+/** A UTC day `n` days after the real today (keeps armed alarms in the future). */
+function futureDay(n: number): string {
+  return utcDay(new Date(Date.now() + n * DAY_MS));
+}
+
+function at(day: string, time: string): number {
+  return Date.parse(`${day}T${time}Z`);
+}
+
+function saltDeadline(day: string): number {
+  return at(day, "00:00:00") + DAY_MS + GRACE_MS;
+}
+
+type SaltSql = { exec(q: string, ...b: unknown[]): { one(): Record<string, unknown> } };
+interface SaltInstance {
+  getSalt(day: string): Promise<string>;
+  clock: () => number;
+  alarm(): Promise<void>;
+  rearmOnWake(): Promise<void>;
+  sweepSalts(now: number): void;
+  recordEvent(e: CountEvent): Promise<void>;
+  pending: Map<string, unknown>;
+  ctx: {
+    storage: {
+      sql: SaltSql;
+      getAlarm(): Promise<number | null>;
+      deleteAlarm(): Promise<void>;
+    };
+  };
+}
+
+function saltRows(i: SaltInstance, day: string): number {
+  return Number(
+    i.ctx.storage.sql.exec("SELECT COUNT(*) AS c FROM salt WHERE day = ?", day).one().c,
+  );
+}
+
+describe("SiteLive.getSalt (ADR-0013 §1)", () => {
+  it("concurrent first fetches return one salt and store exactly one row", async () => {
+    const stub = stubFor("salt-concurrent");
+    const day = utcDayUTC();
+    const salts = await Promise.all(Array.from({ length: 20 }, () => stub.getSalt(day)));
+    expect(new Set(salts).size).toBe(1);
+    expect(salts[0]).toMatch(/^[0-9a-f]{64}$/);
+    await runInDurableObject(stub, (instance) => {
+      expect(saltRows(instance as unknown as SaltInstance, day)).toBe(1);
+    });
+  });
+
+  it("is per-site, and every isolate's stub for one site gets the same salt", async () => {
+    const day = utcDayUTC();
+    const a1 = await stubFor("salt-site-a").getSalt(day);
+    const a2 = await stubFor("salt-site-a").getSalt(day); // a second isolate's fresh stub
+    const b = await stubFor("salt-site-b").getSalt(day);
+    expect(a2).toBe(a1);
+    expect(b).not.toBe(a1);
+  });
+
+  it("mints a new salt after midnight while still serving the old day inside GRACE", async () => {
+    const stub = stubFor("salt-rollover");
+    const d = futureDay(2);
+    const d1 = futureDay(3);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      i.clock = () => at(d, "23:59:00");
+      const s0 = await i.getSalt(d);
+      i.clock = () => at(d1, "00:00:01");
+      const s1 = await i.getSalt(d1);
+      expect(s1).not.toBe(s0);
+      expect(await i.getSalt(d)).toBe(s0); // late beacon for D, inside GRACE
+    });
+  });
+
+  it("refuses outside [start(day), end(day)+GRACE) and never re-mints a deleted day", async () => {
+    const stub = stubFor("salt-window");
+    const d = futureDay(2);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      // No early issuance: one ms before D starts.
+      i.clock = () => at(d, "00:00:00") - 1;
+      await expect(i.getSalt(d)).rejects.toThrow();
+      expect(saltRows(i, d)).toBe(0);
+      // Past the deadline for a day never minted.
+      i.clock = () => saltDeadline(d);
+      await expect(i.getSalt(d)).rejects.toThrow();
+      expect(saltRows(i, d)).toBe(0);
+      // Mint, expire, delete: the deleted day cannot come back.
+      i.clock = () => at(d, "12:00:00");
+      await i.getSalt(d);
+      i.clock = () => saltDeadline(d) + 1;
+      await i.alarm();
+      expect(saltRows(i, d)).toBe(0);
+      await expect(i.getSalt(d)).rejects.toThrow();
+      expect(saltRows(i, d)).toBe(0);
+    });
+  });
+});
+
+describe("SiteLive salt expiry alarm (ADR-0013 §3)", () => {
+  it("deletes an expired salt with no further traffic and leaves no alarm armed", async () => {
+    const stub = stubFor("salt-expire");
+    const d = futureDay(2);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      i.clock = () => at(d, "12:00:00");
+      await i.getSalt(d);
+      expect(await i.ctx.storage.getAlarm()).toBe(saltDeadline(d)); // armed at mint
+      i.clock = () => saltDeadline(d) + 1;
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      expect(saltRows(i, d)).toBe(0);
+      expect(await i.ctx.storage.getAlarm()).toBeNull();
+    });
+  });
+
+  it("an event arms a 15 s flush under a salt deadline; the drain re-arms the deadline", async () => {
+    const stub = stubFor("salt-multiplex");
+    const day = utcDayUTC();
+    await stub.getSalt(day);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      expect(await i.ctx.storage.getAlarm()).toBe(saltDeadline(day));
+    });
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v1", path: "/a", siteId: "salt-multiplex-site", day })),
+    });
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      expect(await i.ctx.storage.getAlarm()).toBeLessThanOrEqual(Date.now() + 15_000);
+    });
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      expect(i.pending.size).toBe(0);
+      expect(await i.ctx.storage.getAlarm()).toBe(saltDeadline(day));
+    });
+  });
+
+  it("re-arms the salt deadline on wake when a salt row exists and no alarm is set", async () => {
+    const stub = stubFor("salt-wake");
+    const day = utcDayUTC();
+    await stub.getSalt(day);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      await i.ctx.storage.deleteAlarm();
+      await i.rearmOnWake();
+      expect(await i.ctx.storage.getAlarm()).toBe(saltDeadline(day));
+    });
+  });
+
+  it("deletes the salt even when every flush fails, and retries a failed delete in 60 s", async () => {
+    const d = futureDay(2);
+    const spy = vi.spyOn(env.DB, "batch").mockImplementation(() => {
+      throw new Error("D1 down");
+    });
+    try {
+      await runInDurableObject(stubFor("salt-flush-fail"), async (instance) => {
+        const i = instance as unknown as SaltInstance;
+        i.clock = () => at(d, "12:00:00");
+        await i.getSalt(d);
+        await i.recordEvent(evt({ vid: "v1", siteId: "salt-flush-fail-site", day: d }));
+        i.clock = () => saltDeadline(d) + 1;
+        await i.alarm(); // flush throws inside; the salt delete must still run
+        expect(saltRows(i, d)).toBe(0);
+        expect(i.pending.size).toBeGreaterThan(0);
+        expect(await i.ctx.storage.getAlarm()).not.toBeNull();
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    await runInDurableObject(stubFor("salt-delete-fail"), async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      i.clock = () => at(d, "12:00:00");
+      await i.getSalt(d);
+      const now = saltDeadline(d) + 1;
+      i.clock = () => now;
+      const sweep = vi.spyOn(i, "sweepSalts").mockImplementationOnce(() => {
+        throw new Error("sqlite busy");
+      });
+      await i.alarm();
+      expect(saltRows(i, d)).toBe(1);
+      expect(await i.ctx.storage.getAlarm()).toBe(now + 60_000);
+      sweep.mockRestore();
+      await i.alarm();
+      expect(saltRows(i, d)).toBe(0);
+    });
+  });
+});
+
+describe("SiteLive designated event day (ADR-0013 §1a)", () => {
+  it("rolls an event up under its designated day, not the DO clock's day", async () => {
+    const stub = stubFor("eday-1");
+    const site = "eday-1-site";
+    const d = futureDay(2);
+    const d1 = futureDay(3);
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as SaltInstance;
+      i.clock = () => at(d, "23:59:59");
+      await i.getSalt(d); // the collector fetched D's salt at receipt
+      i.clock = () => at(d1, "00:00:02"); // the DO clock is already on D+1
+    });
+    await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v1", siteId: site, day: d })),
+    });
+    await runDurableObjectAlarm(stub);
+
+    const rows = await env.DB.prepare(
+      "SELECT day, pageviews FROM rollup_daily WHERE site_id=? AND dimension='total'",
+    )
+      .bind(site)
+      .all<{ day: string; pageviews: number }>();
+    expect(rows.results).toEqual([{ day: d, pageviews: 1 }]);
+  });
+
+  it("drops an event whose day has no salt row in this DO", async () => {
+    const stub = stubFor("eday-2");
+    const res = await stub.fetch("https://do-internal/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evt({ vid: "v1", siteId: "eday-2-site", day: futureDay(-3) })),
+    });
+    expect(res.status).toBe(204);
+    await runInDurableObject(stub, (instance) => {
+      const i = instance as unknown as SaltInstance & { visitors: Map<string, unknown> };
+      expect(i.pending.size).toBe(0);
+      expect(i.visitors.size).toBe(0);
+      const seen = i.ctx.storage.sql.exec("SELECT COUNT(*) AS c FROM seen").one().c;
+      expect(seen).toBe(0);
     });
   });
 });

@@ -40,8 +40,8 @@ field list is the `WaeEvent` interface in
 | Stored field | Derived from | Notes |
 |---|---|---|
 | `siteId` | the beacon's site id | Partitions events; never a per-visitor identifier. |
-| `vid` | HMAC of IP + UA + salt + site ([§2](#2-the-visitor-id-precisely)) | 16-hex cookieless daily visitor hash. |
-| `pathname`, `entryPath` | the beacon's path | `entryPath` currently duplicates `pathname` (reserved for future funnel/landing-page reporting). |
+| `vid` | HMAC of IP + UA + salt + site ([§2](#2-the-visitor-id-precisely)) | 16-hex cookieless daily visitor hash. Empty when the day's salt could not be fetched, so the event is kept without any visitor identity. |
+| `pathname`, `entryPath` | the beacon's path, query string removed | The query string is read only for UTM tags and never stored. `entryPath` currently duplicates `pathname` (reserved for future funnel/landing-page reporting). |
 | `referrerHost` | the beacon's referrer, host-only | e.g. `news.ycombinator.com` — never the full referrer URL, never query params. |
 | `utmSource`, `utmMedium`, `utmCampaign` | the path's query string | Standard campaign tags, if present. |
 | `country` | `request.cf.country` | Two-letter country code only. **No city, no region, no coordinates.** |
@@ -49,6 +49,7 @@ field list is the `WaeEvent` interface in
 | `eventName`, `propsJson` | the beacon's custom-event name/props | Empty for pageviews. Whatever you put in a custom-event prop is stored verbatim — see [§5](#5-what-skopia-does-not-collect). |
 | `screenWidth` | the beacon's `screen.width` | Also used server-side to bucket `deviceClass` when the `User-Agent` alone reads as desktop. |
 | `count`, `isPageview` | fixed / beacon type | Aggregation bookkeeping, not visitor data. |
+| `eventDay` | the collector's clock at receipt | UTC day (`YYYY-MM-DD`) the event is counted under, so raw events and daily rollups agree near midnight. Not visitor data. |
 
 The broader `request.cf` object (which also carries data-center, ASN, and
 network-org fields used only for bot filtering) is read once per request and
@@ -81,16 +82,46 @@ Read the function: [`src/shared/identity.ts`](../src/shared/identity.ts).
   hash **in memory**, and then discarded — see the identity step in
   [`handleCollect`](../src/collector/index.ts). Neither is ever written to WAE,
   D1, or any log.
-- `daily_salt` is 32 cryptographically random bytes (`crypto.getRandomValues`),
-  generated on first use for a given UTC day and stored in Workers KV — see
-  [`getDailySalt`](../src/shared/identity.ts). Its KV TTL is anchored to the day
-  boundary, not to when it was created: the salt expires roughly **1 hour after
-  its own UTC day ends**. Once a day's salt is gone, no one — including the
-  site owner — has the input needed to recompute or verify that day's
-  `visitor_id` values, because the salt is never written anywhere else and is
-  not recoverable from the hash output.
-- `site_id` is part of the hashed message, so the same person on two different
-  sites in the same deployment produces two unrelated `visitor_id` values.
+- `daily_salt` is 32 cryptographically random bytes (`crypto.getRandomValues`).
+  **Each site gets its own salt for each UTC day.**
+  - It is created on first use and stored in that site's `SiteLive` Durable
+    Object, in the Object's own SQLite storage
+    ([ADR-0013](decisions/0013-do-owned-daily-salt.md)).
+  - A Durable Object is a single, globally unique instance per site, so every
+    Cloudflare location sees the same salt for a given site and day.
+  - The collector keeps a copy in memory for the rest of that day, so it doesn't
+    fetch the salt on every beacon. It never writes the salt anywhere else: not
+    to WAE, D1, KV or any log.
+- **Deletion.** Each salt is deleted by the Durable Object's alarm about
+  **10 minutes after its own UTC day ends**, even if the site gets no more
+  traffic. The Object also refuses to create a salt for a day that has already
+  ended, so a deleted salt is never re-created.
+- **The 30-day recovery window.** Cloudflare keeps a point-in-time recovery
+  (PITR) log for every SQLite-backed Durable Object. It can
+  [restore the Object's storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
+  to any moment in the **past 30 days**. So a deleted salt stays recoverable for
+  up to 30 days, but **only by someone who can deploy code to the Worker in
+  your Cloudflare account**. This is an accepted trade-off
+  ([ADR-0013 §7](decisions/0013-do-owned-daily-salt.md)). What that access
+  does and does not allow:
+  - **It does allow** confirming that one *specific* person visited on one
+    *specific* past day within those 30 days. That takes four things together:
+    the restored salt, `IDENTITY_HMAC_SECRET`, the person's exact IP address and
+    User-Agent from that day (which Skopia never stores, so they must come from
+    somewhere else), and the stored `visitor_id` values.
+  - **It does not allow** recovering an IP address or User-Agent from a
+    `visitor_id`, which is a one-way hash. It does not allow linking a person
+    across days or across sites. And it does not allow anything after 30 days,
+    when the recovery log ages out.
+  - A restore rolls back the site's whole Durable Object, including its live
+    counters. It cannot be done quietly, and it cannot be done by site visitors,
+    dashboard viewers or share-link holders.
+  - **After 30 days, no one, including the site owner, can recompute or verify
+    that day's `visitor_id` values.** The salt is gone from live storage and
+    from the recovery log, and it cannot be derived from the hash output.
+- `site_id` is part of the hashed message, and each site has its own salt. So
+  the same person on two different sites in the same deployment produces two
+  unrelated `visitor_id` values.
 - Truncating the HMAC output to 64 bits (16 hex chars) is deliberate: enough
   entropy to count a day's uniques without collision at realistic traffic, too
   short to serve as a durable fingerprint.
@@ -174,8 +205,10 @@ or stored.
 
 The claims above are backed by these files, at the paths above:
 
-- [`src/shared/identity.ts`](../src/shared/identity.ts) — visitor-id derivation
-  and daily salt.
+- [`src/shared/identity.ts`](../src/shared/identity.ts) — visitor-id derivation.
+- [`src/dashboard/site-live.ts`](../src/dashboard/site-live.ts) — the per-site
+  `SiteLive` Durable Object, which creates, stores and deletes each site's daily
+  salt ([ADR-0013](decisions/0013-do-owned-daily-salt.md)).
 - [`src/collector/index.ts`](../src/collector/index.ts) — the ingestion path:
   what is read from the request, what is discarded, what is written.
 - [`src/shared/types.ts`](../src/shared/types.ts) — the exact stored-field list

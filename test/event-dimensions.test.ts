@@ -4,6 +4,7 @@ import { type CountEvent, eventDimensions } from "../src/dashboard/event-dimensi
 function base(overrides: Partial<CountEvent> = {}): CountEvent {
   return {
     siteId: "s1",
+    day: "2026-06-21",
     vid: "v1",
     isPageview: 1,
     path: "/blog",

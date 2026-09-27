@@ -30,8 +30,8 @@ privacy-first Google Analytics alternative with nothing to run.**
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jasonm4130/skopia)
 
-One click provisions D1, KV, the `SiteLive` Durable Object, and a Workers Analytics Engine
-dataset into *your own* Cloudflare account, then prompts for four secrets. The full
+One click provisions D1, a KV cache namespace, the `SiteLive` Durable Object, and a Workers
+Analytics Engine dataset into *your own* Cloudflare account, then prompts for four secrets. The full
 walkthrough — secret generation, the CLI alternative, local dev — lives in the
 [install guide](docs/install.md#one-click-deploy).
 
@@ -95,9 +95,10 @@ Add the tracking snippet, verify it, track multiple sites, and send custom event
 - **Cloudflare Workers** — a single Worker serves the collector, the dashboard, and the
   public share surface.
 - **D1** (SQLite) — sites, users, and daily rollups (`migrations/`).
-- **Workers KV** — the response cache and the daily identity salt.
-- **Durable Objects** (`SiteLive`) — event-driven live counts and the unsampled `rollup_daily`
-  writer ([ADR-0011](docs/decisions/0011-do-rollup-cutover.md)).
+- **Workers KV** — the dashboard response cache.
+- **Durable Objects** (`SiteLive`) — event-driven live counts, the unsampled `rollup_daily`
+  writer ([ADR-0011](docs/decisions/0011-do-rollup-cutover.md)), and each site's daily identity
+  salt ([ADR-0013](docs/decisions/0013-do-owned-daily-salt.md)).
 - **Workers Analytics Engine** — the raw, 90-day event store.
 - **[Hono](https://hono.dev)** — routing, in the same Worker as everything else.
 - **TypeScript**, strict mode. Tests: **Vitest** with
