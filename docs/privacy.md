@@ -40,8 +40,8 @@ field list is the `WaeEvent` interface in
 | Stored field | Derived from | Notes |
 |---|---|---|
 | `siteId` | the beacon's site id | Partitions events; never a per-visitor identifier. |
-| `vid` | HMAC of IP + UA + salt + site ([§2](#2-the-visitor-id-precisely)) | 16-hex cookieless daily visitor hash. |
-| `pathname`, `entryPath` | the beacon's path | `entryPath` currently duplicates `pathname` (reserved for future funnel/landing-page reporting). |
+| `vid` | HMAC of IP + UA + salt + site ([§2](#2-the-visitor-id-precisely)) | 16-hex cookieless daily visitor hash. Empty when the day's salt could not be fetched, so the event is kept without any visitor identity. |
+| `pathname`, `entryPath` | the beacon's path, query string removed | The query string is read only for UTM tags and never stored. `entryPath` currently duplicates `pathname` (reserved for future funnel/landing-page reporting). |
 | `referrerHost` | the beacon's referrer, host-only | e.g. `news.ycombinator.com` — never the full referrer URL, never query params. |
 | `utmSource`, `utmMedium`, `utmCampaign` | the path's query string | Standard campaign tags, if present. |
 | `country` | `request.cf.country` | Two-letter country code only. **No city, no region, no coordinates.** |
@@ -49,6 +49,7 @@ field list is the `WaeEvent` interface in
 | `eventName`, `propsJson` | the beacon's custom-event name/props | Empty for pageviews. Whatever you put in a custom-event prop is stored verbatim — see [§5](#5-what-skopia-does-not-collect). |
 | `screenWidth` | the beacon's `screen.width` | Also used server-side to bucket `deviceClass` when the `User-Agent` alone reads as desktop. |
 | `count`, `isPageview` | fixed / beacon type | Aggregation bookkeeping, not visitor data. |
+| `eventDay` | the collector's clock at receipt | UTC day (`YYYY-MM-DD`) the event is counted under, so raw events and daily rollups agree near midnight. Not visitor data. |
 
 The broader `request.cf` object (which also carries data-center, ASN, and
 network-org fields used only for bot filtering) is read once per request and
