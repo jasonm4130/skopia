@@ -76,14 +76,17 @@ accepted trade-off (§7).**
   - Result: **exactly one salt per site per day**. "Each Durable Object has a globally-unique
     name" (same page), so every collector isolate worldwide reaches the same object.
 - **Validity window.** `getSalt(day)` serves or creates a salt only when the DO's own clock is
-  inside `[start(day) − 5 min, end(day) + GRACE)`, with `GRACE = 10 min`. Outside that window
+  inside `[start(day), end(day) + GRACE)`, with `GRACE = 10 min`. Outside that window
   it throws.
   - This rule keeps a **deleted past-day salt from ever being re-minted** by a late or skewed
     request. A re-minted salt would split that day's vids and would also recreate secret
     material the design promised to destroy.
-  - The 5-minute lead tolerates collector clocks that run slightly ahead. It cannot split a
-    visitor, because the rollup day is the collector's designated event day, not the DO's own
-    clock (§1a).
+  - **No early issuance.** A request for day D+1 before the DO's clock reaches `start(D+1)`
+    throws and takes the §4 failure path (WAE point with `vid = ""`). An earlier draft allowed a
+    5-minute lead for fast collector clocks, but that lets one visitor hold D's salt on an
+    accurate isolate and D+1's salt on a fast one *before* midnight, which is the split this
+    ADR exists to prevent. Cloudflare machine clocks are NTP-synced, so the rejected window is
+    expected to be milliseconds wide.
   - `GRACE` replaces the old KV TTL of +1 h. Retention gets shorter, not longer. See the
     note on the collector memo in §2.
 - The salt is still 32 bytes from `crypto.getRandomValues`, hex-encoded. Only where it is
@@ -104,7 +107,11 @@ for three things: the `getSalt(day)` call, the memo key, and a new `day` field i
   in this DO (that is, the day was issued a salt here and has not been deleted). Otherwise it
   drops the event and logs it. This also rejects forged or stale days: a day whose salt has
   been deleted can never gain new rollup rows.
-- The WAE point carries the same `day` implicitly through its timestamp; no WAE schema change.
+- **WAE carries the day explicitly.** A new blob, `eventDay` (blob14, appended after
+  `propsJson`, so existing slots do not move), stores the same designated day. WAE's own
+  timestamp is the write time, which after §5 is inside `waitUntil` and can fall after midnight
+  for a beacon received before it; a manual WAE recompute must bucket by blob14, not by
+  timestamp, so it agrees with `rollup_daily`. `WAE_BLOB_SLOTS` and spec §4.1 gain the slot.
 
 ### 2. Collector memo
 
