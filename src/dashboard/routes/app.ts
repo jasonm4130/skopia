@@ -1,7 +1,7 @@
 /** Skopia — auth-gated /app/* views and the /live WebSocket proxy. */
 
 import type { Context, Hono } from "hono";
-import { listSites } from "../../db/queries";
+import { getStatCards, listSites } from "../../db/queries";
 import type { SiteRow } from "../../shared/types";
 import { requireAuth } from "../auth";
 import type { DashEnv } from "../env";
@@ -9,7 +9,7 @@ import { readLiveSnapshot } from "../live-snapshot";
 import { parseRange } from "../range";
 import { type Chrome, htmlDoc, shell } from "../render/layout";
 import { liveScript } from "../render/live";
-import { noSitesPage } from "../render/pages";
+import { firstRunContent, noSitesPage } from "../render/pages";
 import { BREAKDOWN_VIEWS, breakdownPage, overviewContent, type ViewCtx } from "../views";
 
 // ---------------------------------------------------------------------------
@@ -98,15 +98,30 @@ export function registerAppRoutes(dashboard: Hono<DashEnv>): void {
     const { sites, site } = await resolveSites(c.env.DB, c.req.query("site"));
     if (!site) return onNoSite(sites);
 
-    const ch: Chrome = { surface: "app", view, site, sites, token: "", rangeKey: range.key };
+    // First run: nothing in the last 90 days, so the Overview becomes the
+    // snippet page, with the view tabs and range keys hidden (nothing to browse).
+    const firstRun =
+      view === "overview" &&
+      (await getStatCards(c.env.DB, site.id, parseRange("90d"))).pageviews === 0;
+    const ch: Chrome = {
+      surface: "app",
+      view,
+      site,
+      sites,
+      token: "",
+      rangeKey: range.key,
+      bare: firstRun,
+    };
     // Only the Overview shows online-now, so only it pays for the DO read. A failed
     // read still renders the (zero) compartment: the /live socket fills it in.
     const live =
       view === "overview"
         ? ((await readLiveSnapshot(c.env, site.id)) ?? { visitors: 0, topPages: [] })
         : null;
-    const body =
-      (await content({ db: c.env.DB, site, range, nonce, ch, live })) + liveScript(site.id, nonce);
+    const main = firstRun
+      ? firstRunContent(site, new URL(c.req.url).origin, live?.visitors ?? 0)
+      : await content({ db: c.env.DB, site, range, nonce, ch, live });
+    const body = main + liveScript(site.id, nonce);
 
     return c.html(htmlDoc(title(site), shell(ch, body), nonce));
   };

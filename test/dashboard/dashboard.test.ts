@@ -1093,6 +1093,36 @@ describe("/app/events", () => {
 // Live top-pages panel (Theme A)
 // ---------------------------------------------------------------------------
 
+describe("first run (no pageviews in 90 days)", () => {
+  it("shows the snippet and a static listening beacon, with no tabs or range keys", async () => {
+    vi.mocked(queries.getStatCards).mockResolvedValue({
+      ...MOCK_CARDS,
+      pageviews: 0,
+      visitors: 0,
+    });
+    const cookieVal = await authedCookie();
+    const { text } = await fetch_(
+      req("/app", { headers: { Cookie: `skopia_session=${cookieVal}` } }),
+    );
+    const root = parse(text);
+    expect(root.querySelector(".first h1")?.text).toContain("No pageviews yet");
+    // The snippet points at this Worker's own origin and this site's id.
+    const snip = root.querySelector("#snippet")?.text ?? "";
+    expect(snip).toContain('"https://skopia.test/skopia.js"');
+    expect(snip).toContain('"site-001"');
+    expect(snip).toContain('"https://skopia.test/e"');
+    // A static hollow beacon, a grey zero, no blinking cursor.
+    expect(root.querySelector(".listen .beacon")).toBeTruthy();
+    expect(root.querySelector(".listen [data-odo]")?.classList.contains("zero")).toBe(true);
+    expect(root.querySelector(".listen .ldot")).toBeFalsy();
+    expect(text).not.toMatch(/class="[^"]*\b(cursor|caret|blink)/);
+    expect(text).not.toContain("@keyframes blink");
+    // Nothing to browse yet: no view tabs, no range keys.
+    expect(root.querySelector("nav.views")).toBeFalsy();
+    expect(root.querySelector(".keys")).toBeFalsy();
+  });
+});
+
 describe("live top-pages panel", () => {
   it("Overview renders the live-pages panel container", async () => {
     const cookieVal = await authedCookie();

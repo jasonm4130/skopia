@@ -428,16 +428,18 @@ describe("contrast + responsive auth cards", () => {
     expect(pages.text).not.toContain("#6a7184");
   });
 
-  it("auth cards use max-width, not a fixed width:360/400/440px", async () => {
+  it("auth forms sit in a fluid grid column, not a fixed pixel width", async () => {
     vi.mocked(queries.getOwner).mockResolvedValue(MOCK_OWNER);
     const login = await render("/login");
     // A fixed pixel width (not part of `max-width:`) must not appear.
-    expect(login.text).not.toMatch(/(?<!max-)width:(?:360|400|440)px/);
-    expect(login.text).toContain("max-width:360px");
+    expect(login.text).not.toMatch(/(?<!max-)width:(?:360|380|400|440|480)px/);
+    expect(login.root.querySelector("main.login-main form.login-form")).toBeTruthy();
+    // The column shrinks below its cap: minmax(0, cap), and one column on a phone.
+    expect(login.text).toContain("grid-template-columns:minmax(0,380px) minmax(0,500px)");
 
     vi.mocked(queries.getOwner).mockResolvedValue(null);
     const setup = await render("/setup");
-    expect(setup.text).not.toMatch(/(?<!max-)width:(?:360|400|440)px/);
-    expect(setup.text).toContain("max-width:400px");
+    expect(setup.text).not.toMatch(/(?<!max-)width:(?:360|380|400|440|480)px/);
+    expect(setup.root.querySelector("main.login-main.solo form.login-form")).toBeTruthy();
   });
 });
