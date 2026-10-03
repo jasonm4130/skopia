@@ -1,31 +1,12 @@
-# Skopia — Cloudflare-native web analytics
+# Skopia
 
-> **Skopia** (Greek *skopeín*, "to observe"; domain **skopia.dev**) — a privacy-respecting,
-> self-hostable web analytics tool built *entirely* on the Cloudflare developer platform.
-> Think Plausible/Umami, but where the storage, compute, ingestion, and dashboard all run on
-> Cloudflare primitives (Workers, D1, KV, Durable Objects, Workers Analytics Engine). R2 is
-> an opt-in, not-MVP archival seam (commented out in `wrangler.jsonc`); Pages isn't used
-> (maintenance-mode per ADR-0007/ADR-0005).
+Cloudflare-native, self-hostable, privacy-first web analytics. Product pitch, positioning,
+differentiation and non-goals: `docs/specs/2026-06-21-product-spec.md` and `README.md`.
 
 This file is the operating contract for any AI agent or human working in this repo. It
 overrides default behavior. Read it before acting.
 
 ---
-
-## What we are building
-
-- **Product:** A drop-in `<script>` (and optional cookieless/server-side collection) that
-  reports site traffic to a Cloudflare-hosted backend, with a dashboard for viewing it.
-- **Positioning:** Open-source, **self-host on your own Cloudflare account**. One deploy =
-  one owner's sites. No multi-tenant billing, no SaaS control plane (yet). Easy `deploy`
-  is a first-class feature.
-- **Differentiation:** **Privacy-first** is the decided thesis (see
-  `docs/specs/2026-06-21-product-spec.md` §1 "Differentiation thesis" and the README
-  tagline): cookieless by default, no cross-site identifiers, no raw PII at rest.
-  ADR-0002 rejects identity schemes that would void it. Don't relitigate without a new
-  spec or ADR.
-- **Non-goals (for now):** Multi-tenant SaaS billing, ad-tech/PII profiling, cross-site
-  user tracking, a hosted offering. Revisit only if the spec says so.
 
 ## The two decision-making agents
 
