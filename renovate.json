@@ -1,0 +1,7 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>jasonm4130/renovate-config",
+    "github>jasonm4130/renovate-config:deploys-on-merge"
+  ]
+}
