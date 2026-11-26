@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "packageManager": "pnpm@11.0.8",
+  "packageManager": "pnpm@11.11.0",
   "scripts": {
     "dev": "wrangler dev",
     "test": "vitest run",
